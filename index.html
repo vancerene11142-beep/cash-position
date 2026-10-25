@@ -219,6 +219,24 @@
   .notice details { margin-top: 6px; color: var(--ink-soft); }
   .notice li { margin: 3px 0; word-break: break-word; }
 
+  .dialog {
+    position: fixed; inset: 0; z-index: 40; background: rgba(10,10,8,.55); display: flex;
+    align-items: center; justify-content: center; padding: 20px;
+  }
+  .dialog-box {
+    width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px;
+    padding: 20px 18px 16px; box-shadow: 0 12px 40px rgba(0,0,0,.3);
+  }
+  .dialog-box h3 { margin: 0 0 6px; font-size: 16px; }
+  .dialog-box p { margin: 0 0 16px; font-size: 14px; color: var(--ink-soft); word-break: break-word; }
+  .dialog-actions { display: flex; gap: 8px; }
+  .dialog-actions .btn { flex: 1; }
+  .btn.danger { background: var(--short); color: #fff; border-color: var(--short); font-weight: 600; }
+  .row input.fixed-name {
+    font-weight: 700; letter-spacing: 0.05em; background: var(--neutral-bg); border-color: transparent; color: var(--ink);
+  }
+  .row .spacer { width: 28px; height: 28px; }
+
   .toast {
     position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
     max-width: calc(100% - 28px); display: flex; align-items: center; gap: 12px; padding: 11px 16px;
@@ -286,7 +304,7 @@
     </div>
     <div class="footer"><button class="clear-btn" id="clear-btn">Clear all lines</button></div>
     <div class="confirm-bar" id="confirm-bar">
-      <span>Clear every line on both sides?</span>
+      <span>Clear every line and amount on both sides?</span>
       <button class="yes" id="confirm-yes">Clear</button>
       <button class="no" id="confirm-no">Cancel</button>
     </div>
@@ -344,6 +362,17 @@
 </div>
 
 <div class="toast" id="toast" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
+
+<div class="dialog" id="dialog" hidden>
+  <div class="dialog-box" role="alertdialog" aria-labelledby="dialog-title">
+    <h3 id="dialog-title">Are you sure?</h3>
+    <p id="dialog-text"></p>
+    <div class="dialog-actions">
+      <button class="btn" id="dialog-cancel">Cancel</button>
+      <button class="btn danger" id="dialog-ok">Delete</button>
+    </div>
+  </div>
+</div>
 
 <div class="preview" id="preview" hidden>
   <div class="preview-scroll"><img id="preview-img" alt="Cash position"></div>
@@ -651,6 +680,30 @@
   }
   function isBlank(r) { return r.src === 'manual' && !r.name && !r.amount; }
   function hasAmount(r) { return !isNaN(parseFloat(r.amount)); }
+
+  // Fixed IN lines: always present at the top, name locked, you only type the amount
+  var FIXED_IN = ['SHOP', 'OFFICE'];
+  function fixedRow(name) {
+    return { id: nid(), name: name, amount: '', ok: true, src: 'fixed', reason: '', alts: [], raw: '', meta: '' };
+  }
+  function ensureFixed(list) {
+    var fixed = [], rest = list.slice();
+    FIXED_IN.forEach(function (nm) {
+      var at = -1;
+      rest.forEach(function (r, k) {
+        if (at < 0 && (r.src === 'fixed' || r.src === 'manual') && String(r.name).trim().toUpperCase() === nm) at = k;
+      });
+      if (at >= 0) {
+        var r = rest.splice(at, 1)[0];
+        r.src = 'fixed'; r.name = nm; r.ok = true; r.reason = ''; r.alts = [];
+        fixed.push(r);
+      } else {
+        fixed.push(fixedRow(nm));
+      }
+    });
+    return fixed.concat(rest);
+  }
+  function freshIn() { return ensureFixed([]).concat([blankRow()]); }
   function fix(r) {
     return {
       id: r.id || nid(), name: r.name || '', amount: r.amount == null ? '' : String(r.amount),
@@ -696,7 +749,8 @@
       var keep = [];
       state[k].forEach(function (r) { if (r.ok) keep.push(r); else state.stage[k].push(r); });
       state[k] = keep;
-      if (state[k].length === 0) state[k].push(blankRow());
+      if (k === 'in') state.in = ensureFixed(state.in);
+      if (state[k].length === (k === 'in' ? FIXED_IN.length : 0)) state[k].push(blankRow());
     });
   }
   function save() {
@@ -739,6 +793,7 @@
     nameInput.placeholder = 'Name';
     nameInput.value = row.name;
     nameInput.addEventListener('input', function () { row.name = nameInput.value; save(); });
+    if (row.src === 'fixed') { nameInput.readOnly = true; nameInput.className = 'fixed-name'; nameInput.setAttribute('tabindex', '-1'); }
 
     var amtInput = el('input', 'amt');
     amtInput.type = 'number';
@@ -767,9 +822,14 @@
     var rmBtn = el('button', 'rm');
     rmBtn.setAttribute('aria-label', 'Remove line');
     rmBtn.textContent = '×';
-    rmBtn.addEventListener('click', function () { removeRow(key, row.id); });
+    rmBtn.addEventListener('click', function () {
+      if (isBlank(row)) { removeRow(key, row.id); return; }
+      var what = (row.name || 'This line') + (hasAmount(row) ? ' — ₹' + fmt(parseFloat(row.amount)) : '');
+      ask('Delete this line?', what, 'Delete', function () { removeRow(key, row.id); });
+    });
 
-    line.appendChild(nameInput); line.appendChild(amtInput); line.appendChild(rmBtn);
+    line.appendChild(nameInput); line.appendChild(amtInput);
+    line.appendChild(row.src === 'fixed' ? el('div', 'spacer') : rmBtn);
     entry.appendChild(line);
     entry.appendChild(cap);
     updateCap();
@@ -887,6 +947,19 @@
   }
   function hideToast() { $('toast').hidden = true; clearTimeout(toastTimer); }
 
+  var dialogFn = null;
+  function ask(title, detail, okLabel, fn) {
+    $('dialog-title').textContent = title;
+    $('dialog-text').textContent = detail;
+    $('dialog-ok').textContent = okLabel;
+    dialogFn = fn;
+    $('dialog').hidden = false;
+  }
+  function closeDialog() { $('dialog').hidden = true; dialogFn = null; }
+  $('dialog-ok').addEventListener('click', function () { var f = dialogFn; closeDialog(); if (f) f(); });
+  $('dialog-cancel').addEventListener('click', closeDialog);
+  $('dialog').addEventListener('click', function (e) { if (e.target === $('dialog')) closeDialog(); });
+
   function removeRow(key, id) {
     var list = getList(key), idx = -1;
     list.forEach(function (r, i) { if (r.id === id) idx = i; });
@@ -935,8 +1008,8 @@
     var keep = [], move = [];
     state.stage[tab].forEach(function (r) { if (r.ok && hasAmount(r)) move.push(r); else keep.push(r); });
     if (!move.length) { toast('Nothing confirmed yet'); return; }
-    var list = state[tab];
-    if (list.length === 1 && isBlank(list[0])) list.length = 0;
+    var list = state[tab].filter(function (r) { return !isBlank(r); });
+    state[tab] = list;
     move.forEach(function (r) { list.push(r); });
     state.stage[tab] = keep;
     save(); renderAll();
@@ -949,13 +1022,16 @@
     $('clr-' + tab).addEventListener('click', function () { $('paste-' + tab).value = ''; });
     $('add-conf-' + tab).addEventListener('click', function () { addConfirmed(tab); });
     $('discard-' + tab).addEventListener('click', function () {
-      if (!state.stage[tab].length) return;
-      var saved = state.stage[tab];
-      state.stage[tab] = [];
-      notices[tab] = null;
-      save(); renderAll();
-      toast('Discarded ' + saved.length + (saved.length === 1 ? ' row' : ' rows'), function () {
-        state.stage[tab] = saved.concat(state.stage[tab]); save(); renderAll();
+      var n = state.stage[tab].length;
+      if (!n) return;
+      ask('Discard all ' + n + (n === 1 ? ' row?' : ' rows?'), 'They have not been added to Position yet.', 'Discard', function () {
+        var saved = state.stage[tab];
+        state.stage[tab] = [];
+        notices[tab] = null;
+        save(); renderAll();
+        toast('Discarded ' + saved.length + (saved.length === 1 ? ' row' : ' rows'), function () {
+          state.stage[tab] = saved.concat(state.stage[tab]); save(); renderAll();
+        });
       });
     });
   });
@@ -968,7 +1044,7 @@
   $('clear-btn').addEventListener('click', function () { confirmBar.classList.add('show'); });
   $('confirm-no').addEventListener('click', function () { confirmBar.classList.remove('show'); });
   $('confirm-yes').addEventListener('click', function () {
-    state.in = [blankRow()]; state.out = [blankRow()];
+    state.in = freshIn(); state.out = [blankRow()];
     lastRemoved = null;
     save(); renderAll();
     confirmBar.classList.remove('show');
