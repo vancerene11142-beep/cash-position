@@ -1,9 +1,10 @@
 {
+  "id": "/cash-position/",
   "name": "Cash Position Check",
   "short_name": "Cash Check",
   "description": "Pay and collect position check. Data stays on this device.",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/cash-position/",
+  "scope": "/cash-position/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#f3f1ea",
