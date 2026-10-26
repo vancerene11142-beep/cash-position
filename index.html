@@ -314,7 +314,7 @@
   <section id="tab-out" hidden>
     <div class="paste-card card out">
       <h2>Pay &rarr; OUT</h2>
-      <p class="hint">Paste order messages or deal lines like <b>NAME 1000 * 27.72 (P) = 27,720.00</b>. Check and confirm the doubtful ones below, then add them to Position.</p>
+      <p class="hint">Paste order messages or deal lines like <b>NAME 1000 * 27.72 (P) = 27,720.00</b>. Leave a blank line between two messages. Check and confirm the doubtful ones below, then add them to Position.</p>
       <textarea id="paste-out" placeholder="Paste pay messages here"></textarea>
       <div class="paste-actions">
         <button class="btn primary grow" id="go-out">Read messages</button>
@@ -339,7 +339,7 @@
   <section id="tab-in" hidden>
     <div class="paste-card card in">
       <h2>Collect &rarr; IN</h2>
-      <p class="hint">Paste collection messages or deal lines like <b>NAME 8000 * 27.85 (S) = 2,22,800.00</b>. Check and confirm the doubtful ones below, then add them to Position.</p>
+      <p class="hint">Paste collection messages or deal lines like <b>NAME 8000 * 27.85 (S) = 2,22,800.00</b>. Leave a blank line between two messages. Check and confirm the doubtful ones below, then add them to Position.</p>
       <textarea id="paste-in" placeholder="Paste collect messages here"></textarea>
       <div class="paste-actions">
         <button class="btn primary grow" id="go-in">Read messages</button>
@@ -413,49 +413,44 @@
   ('amt amount give total msg no rs bx box boxes paid done forwarded bal balance note notes more token tokens ok thanks inr please pls collected received cleared')
     .split(' ').forEach(function (w) { STOP[w] = 1; });
 
-  function startsMessage(lines, i) {
-    var first = lines[i];
-    if (findName(first)) return true;
-    var phoneOnly = first.replace(PHONE_RE, function (m, pre) { return pre + ' '; }).replace(/[\s+\-]/g, '') === '';
-    if (!phoneOnly) return false;
-    for (var j = i + 1; j < lines.length; j++) {
-      if (!lines[j].trim()) continue;
-      return !!findName(lines[j]);
-    }
-    return false;
-  }
-
+  // A blank line (or a divider such as the cross mark) ends a message. A chunk that cannot stand
+  // alone (no name in it, e.g. "Total 80" or "Give 5568.00") is treated as the rest of the message above it.
   function splitBlocks(text) {
     var lines = text.split(/\r?\n/);
+    var hasHdr = lines.some(function (l) { return HDR.test(l) || HDR2.test(l); });
     var blocks = [], cur = null;
     function push() {
       if (cur && cur.join('\n').trim()) blocks.push(cur.join('\n').trim());
       cur = null;
     }
-    var hasHdr = lines.some(function (l) { return HDR.test(l) || HDR2.test(l); });
-    var numbered = lines.filter(function (l) { return NUMB.test(l); }).length;
-    var prevBlank = true;
-    for (var i = 0; i < lines.length; i++) {
-      var l = lines[i];
-      var blank = !l.trim();
-      if (SEP.test(l)) { push(); prevBlank = true; continue; }
-      if (hasHdr) {
+    if (hasHdr) {                       // pasted with WhatsApp time stamps: those mark each message
+      lines.forEach(function (l) {
+        if (SEP.test(l)) { push(); return; }
         var m = l.match(HDR) || l.match(HDR2);
-        if (m) { push(); cur = [l.slice(m[0].length)]; continue; }
+        if (m) { push(); cur = [l.slice(m[0].length)]; return; }
         if (!cur) cur = [];
         cur.push(l);
-        continue;
-      }
-      if (numbered >= 2) {
-        if (NUMB.test(l)) { push(); cur = [l]; continue; }
-      } else if (!blank && prevBlank && cur && cur.join('').trim() && startsMessage(lines, i)) {
-        push();
-      }
-      if (!cur) cur = [];
-      cur.push(l);
-      prevBlank = blank;
+      });
+      push();
+      return blocks;
     }
-    push();
+    var numbered = lines.filter(function (l) { return NUMB.test(l); }).length;
+    var chunks = [], buf = [], hard = false;
+    function flush() {
+      if (buf.join('').trim()) { chunks.push({ text: buf.join('\n').trim(), hard: hard }); hard = false; }
+      buf = [];
+    }
+    lines.forEach(function (l) {
+      if (SEP.test(l)) { flush(); hard = true; return; }
+      if (!l.trim()) { flush(); return; }
+      if (numbered >= 2 && NUMB.test(l) && buf.length) flush();
+      buf.push(l);
+    });
+    flush();
+    chunks.forEach(function (c) {
+      var starts = c.hard || !blocks.length || NUMB.test(c.text.split('\n')[0]) || !!findName(c.text);
+      if (starts) blocks.push(c.text); else blocks[blocks.length - 1] += '\n' + c.text;
+    });
     return blocks;
   }
 
