@@ -129,6 +129,35 @@
     color: var(--ink-soft); font-size: 16px; line-height: 1; cursor: pointer; font-family: inherit;
   }
   .row button.rm:active { background: var(--neutral-bg); }
+  .row.numbered { grid-template-columns: 34px 1fr 108px 28px; }
+  .no { font-size: 12px; font-weight: 700; color: var(--accent); text-align: center; font-variant-numeric: tabular-nums; }
+  .pay { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 0 4px 34px; }
+  .paysum { flex-basis: 100%; font-size: 12px; font-weight: 600; color: var(--warn); }
+  .entry.settled .paysum { color: var(--excess); }
+  .entry.settled .row input { text-decoration: line-through; opacity: .6; }
+  .chip.hist { font-size: 11px; padding: 3px 8px; }
+  .payform { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; align-items: center; }
+  .payform input { flex: 1 1 110px; min-width: 0; font: inherit; padding: 8px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .findbar input { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .qseg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .qseg3 button { padding: 8px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; font-size: 13px; }
+  .qseg3 button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .dupwarn { font-size: 12px; color: var(--warn); background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 6px 8px; }
+  .hday { border-top: 1px solid var(--line); padding: 8px 0; }
+  .hday summary { display: flex; justify-content: space-between; gap: 8px; cursor: pointer; }
+  .hsum { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .hsum.neg { color: var(--short); } .hsum.pos { color: var(--excess); }
+  .hhead { font-size: 12px; font-weight: 700; color: var(--ink-soft); margin-top: 8px; }
+  .hline { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .hline .n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .actions { flex-wrap: wrap; }
+  .quick h2 { margin: 0 0 8px; }
+  .qseg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .qseg button { padding: 9px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; font-weight: 600; }
+  .qseg button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .qrow { display: grid; grid-template-columns: 90px 1fr; gap: 6px; }
+  .qrow input { font: inherit; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg); color: var(--ink); min-width: 0; }
+  .hint.bad { color: var(--short); }
   .meta { font-size: 11px; color: var(--ink-soft); padding-left: 2px; word-break: break-word; }
   .cap { font-size: 11px; color: var(--ink-soft); text-align: right; padding-right: 34px; font-variant-numeric: tabular-nums; }
   .verify {
@@ -268,6 +297,7 @@
     <button class="tab active" data-tab="position" role="tab">Position</button>
     <button class="tab" data-tab="out" role="tab">Pay<span class="badge" id="badge-out" hidden></span></button>
     <button class="tab" data-tab="in" role="tab">Collect<span class="badge" id="badge-in" hidden></span></button>
+    <button class="tab" data-tab="history" role="tab">History</button>
   </div>
 
   <details class="settings">
@@ -278,6 +308,19 @@
 
   <!-- POSITION -->
   <section id="tab-position">
+    <div class="card quick">
+      <h2>Part payment</h2>
+      <div class="qseg"><button data-q="out" class="on">Pay (OUT)</button><button data-q="in">Collect (IN)</button></div>
+      <div class="qrow"><input id="q-no" type="number" inputmode="numeric" min="1" step="1" placeholder="Order #"><input id="q-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount paid now"></div>
+      <div class="hint" id="q-info"></div>
+      <div class="actions"><button class="btn primary grow" id="q-go">Record</button><button class="btn" id="q-full">Full balance</button></div>
+    </div>
+    <div class="card findbar">
+      <input id="f-text" type="search" placeholder="Search name, # or amount" autocomplete="off">
+      <div class="qseg3"><button data-f="all" class="on">All</button><button data-f="open">Open</button><button data-f="settled">Settled</button></div>
+      <div class="hint" id="f-info"></div>
+    </div>
+
     <div class="board card">
       <div class="side side-out">
         <div class="side-head"><h2>Out</h2><span class="hint">orders / amount owed</span></div>
@@ -301,6 +344,11 @@
 
     <div class="actions">
       <button class="btn primary grow" id="share-btn">Share image</button>
+      <button class="btn" id="copy-all">Copy as text</button>
+    </div>
+    <div class="actions">
+      <button class="btn grow" id="save-day">Save day</button>
+      <button class="btn grow" id="new-day">Save &amp; start new day</button>
     </div>
     <div class="footer"><button class="clear-btn" id="clear-btn">Clear all lines</button></div>
     <div class="confirm-bar" id="confirm-bar">
@@ -308,6 +356,11 @@
       <button class="yes" id="confirm-yes">Clear</button>
       <button class="no" id="confirm-no">Cancel</button>
     </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="tab-history" hidden>
+    <div class="card"><h2>Saved days</h2><div id="hist-list"></div></div>
   </section>
 
   <!-- PAY -->
@@ -673,8 +726,9 @@
   /* ---------- state ---------- */
   var STORE_KEY = 'cashCheck.v2';
   var OLD_KEY = 'cashCheck.v1';
-  var DEFAULT_BOX = 100000;
-  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX };
+  var DEFAULT_BOX = 1000;
+  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [] };
+  var hiddenCount = { in: 0, out: 0 }, openPay = null, qSide = 'out', fText = '', fMode = 'all';
   var notices = { in: null, out: null };
   var lastRemoved = null;
   var toastTimer = null;
@@ -717,7 +771,9 @@
     return {
       id: r.id || nid(), name: r.name || '', amount: r.amount == null ? '' : String(r.amount),
       ok: r.ok !== false, src: r.src || 'manual', reason: r.reason || '',
-      alts: Array.isArray(r.alts) ? r.alts : [], raw: r.raw || '', meta: r.meta || ''
+      alts: Array.isArray(r.alts) ? r.alts : [], raw: r.raw || '', meta: r.meta || '',
+      no: r.no > 0 ? +r.no : 0, dupOk: !!r.dupOk,
+      paid: Array.isArray(r.paid) ? r.paid.filter(function (x) { return x && x.a > 0; }).map(function (x) { return { a: +x.a, t: x.t || 0 }; }) : []
     };
   }
 
@@ -742,6 +798,9 @@
             state.stage.in = p.stage.in.map(fix); state.stage.out = p.stage.out.map(fix);
           }
           if (p.box > 0) state.box = p.box;
+          if (!p.boxMig && state.box === 100000) state.box = DEFAULT_BOX;   // old default, 1 box is now 1,000
+          if (Array.isArray(p.history)) state.history = p.history;
+          if (p.seq && p.seq.in >= 0 && p.seq.out >= 0) state.seq = { in: +p.seq.in, out: +p.seq.out };
           loaded = true;
         }
       }
@@ -769,8 +828,99 @@
   /* ---------- totals ---------- */
   function sideTotalPaise(side) {
     var p = 0;
-    state[side].forEach(function (r) { var n = parseFloat(r.amount); if (!isNaN(n)) p += paise(n); });
+    state[side].forEach(function (r) { p += balP(r); });
     return p;
+  }
+  function paidP(r) { var p = 0; (r.paid || []).forEach(function (x) { p += paise(x.a); }); return p; }
+  function balP(r) { var n = parseFloat(r.amount); return isNaN(n) ? 0 : paise(n) - paidP(r); }
+  function numberRows(side) {            // serial numbers: given once, in the order amounts appear, never reused today
+    state[side].forEach(function (r) {
+      if (r.src !== 'fixed' && !r.no && hasAmount(r) && r.ok) { state.seq[side] += 1; r.no = state.seq[side]; }
+    });
+  }
+  function nameKey(r) { return String(r.name || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+  function dupOf(key, row) {            // same name + same amount already on this side (Position or review list)
+    if (row.dupOk || row.src === 'fixed' || !hasAmount(row) || !nameKey(row)) return null;
+    var side = key.charAt(0) === 's' ? key.slice(1) : key, hit = null, a = paise(parseFloat(row.amount));
+    state[side].concat(state.stage[side]).forEach(function (o) {
+      if (!hit && o !== row && o.src !== 'fixed' && hasAmount(o) && nameKey(o) === nameKey(row) && paise(parseFloat(o.amount)) === a) hit = o;
+    });
+    return hit;
+  }
+  function rowMatches(r) {
+    if (r.src === 'fixed' || isBlank(r)) return true;
+    var set = paidP(r) > 0 && balP(r) <= 0;
+    if (fMode === 'settled' && !set) return false;
+    if (fMode === 'open' && set) return false;
+    var q = fText.trim().toLowerCase();
+    if (!q) return true;
+    if (q.charAt(0) === '#') return String(r.no) === q.slice(1);
+    return (r.no && String(r.no) === q) || nameKey(r).indexOf(q) >= 0 || String(r.amount).indexOf(q) >= 0 || fmt(parseFloat(r.amount)).replace(/,/g, '').indexOf(q.replace(/,/g, '')) >= 0;
+  }
+  function orderMsg(r) {
+    var t = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ' — order ₹' + fmt(parseFloat(r.amount));
+    if (paidP(r) > 0) t += ', paid ₹' + fmt(paidP(r) / 100);
+    t += balP(r) > 0 ? ', balance ₹' + fmt(balP(r) / 100) : ' — settled';
+    return t;
+  }
+  function copyText(t, m) {
+    function fb() {
+      var a = document.createElement('textarea'); a.value = t; a.style.position = 'fixed'; a.style.opacity = '0';
+      document.body.appendChild(a); a.select();
+      try { document.execCommand('copy'); toast(m); } catch (e) { toast('Could not copy'); }
+      document.body.removeChild(a);
+    }
+    try { navigator.clipboard.writeText(t).then(function () { toast(m); }, fb); } catch (e) { fb(); }
+  }
+  function todayKey() { var d = new Date(), p = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+  function dayLabel(k) {
+    try { var q = k.split('-'); return new Date(+q[0], +q[1] - 1, +q[2]).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }); } catch (e) { return k; }
+  }
+  function snapRows(side) {
+    return state[side].filter(function (r) { return hasAmount(r); }).map(function (r) {
+      return { no: r.no || 0, name: r.name || '', amt: parseFloat(r.amount), paid: paidP(r) / 100, bal: balP(r) / 100, fixed: r.src === 'fixed' };
+    });
+  }
+  function saveDay() {
+    var k = todayKey(), o = sideTotalPaise('out'), i = sideTotalPaise('in');
+    var snap = { d: k, t: Date.now(), out: snapRows('out'), in: snapRows('in'), oP: o / 100, iP: i / 100 };
+    var at = -1; state.history.forEach(function (h, ix) { if (h.d === k) at = ix; });
+    if (at >= 0) state.history[at] = snap; else state.history.push(snap);
+    state.history.sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
+    state.history = state.history.slice(0, 90);
+    save(); renderHistory();
+    return at >= 0;
+  }
+  function carryOver() {
+    function carry(side) {
+      return state[side].filter(function (r) { return r.src !== 'fixed' && hasAmount(r) && balP(r) > 0; }).map(function (r) {
+        return fix({ id: nid(), name: r.name, amount: String(balP(r) / 100), ok: true, src: 'carry',
+          meta: 'Carried from ' + dayLabel(todayKey()) + (paidP(r) > 0 ? ' · order ₹' + fmt(parseFloat(r.amount)) + ', paid ₹' + fmt(paidP(r) / 100) : ''), raw: '' });
+      });
+    }
+    var co = carry('out'), ci = carry('in');
+    state.out = co.length ? co : [blankRow()];
+    state.in = ensureFixed(ci).concat([blankRow()]);
+    state.seq = { in: 0, out: 0 }; openPay = null;
+    return co.length + ci.length;
+  }
+
+  function findNo(side, no) {
+    return state[side].filter(function (r) { return r.src !== 'fixed' && r.no === no; })[0] || null;
+  }
+  function recordPay(side, row, amt) {
+    var a = money(amt);
+    if (!(a > 0)) { toast('Enter the amount paid'); return false; }
+    if (paise(a) > balP(row)) { toast('That is more than the balance ₹' + fmt(balP(row) / 100)); return false; }
+    var rec = { a: a, t: Date.now() };
+    if (!Array.isArray(row.paid)) row.paid = [];
+    row.paid.push(rec);
+    save(); renderAll();
+    var left = balP(row) / 100;
+    toast('#' + row.no + ' ' + (row.name || '') + ': ₹' + fmt(a) + (left > 0 ? ' · balance ₹' + fmt(left) : ' · settled'), function () {
+      row.paid = row.paid.filter(function (x) { return x !== rec; }); save(); renderAll();
+    });
+    return true;
   }
 
   function renderTotals() {
@@ -794,8 +944,12 @@
   function buildEntry(key, row) {
     var staging = key.charAt(0) === 's';
     if (staging && row.ok && !hasAmount(row)) { row.ok = false; row.reason = row.reason || 'Amount missing'; }
-    var entry = el('div', 'entry' + (row.ok ? '' : ' unverified'));
-    var line = el('div', 'row');
+    if (!Array.isArray(row.paid)) row.paid = [];
+    var posKey = key === 'out' || key === 'in';
+    var settled = posKey && row.src !== 'fixed' && hasAmount(row) && paidP(row) > 0 && balP(row) <= 0;
+    var entry = el('div', 'entry' + (row.ok ? '' : ' unverified') + (settled ? ' settled' : ''));
+    var line = el('div', 'row' + (posKey ? ' numbered' : ''));
+    if (posKey) { var nb = el('span', 'no'); nb.textContent = row.no ? '#' + row.no : ''; line.appendChild(nb); }
 
     var nameInput = el('input');
     nameInput.type = 'text';
@@ -824,9 +978,11 @@
         if (vbox) { vbox.remove(); vbox = null; }
       }
       updateCap();
+      if (posKey && row.src !== 'fixed' && row.ok && hasAmount(row) && !row.no) { state.seq[key] += 1; row.no = state.seq[key]; nb.textContent = '#' + row.no; }
       save();
       if (staging) renderStageMeta(key.slice(1)); else renderTotals();
     });
+    if (posKey) amtInput.addEventListener('change', renderAll);
 
     var rmBtn = el('button', 'rm');
     rmBtn.setAttribute('aria-label', 'Remove line');
@@ -844,6 +1000,54 @@
     updateCap();
 
     if (row.meta) { var meta = el('div', 'meta'); meta.textContent = row.meta; entry.appendChild(meta); }
+
+    var dup = dupOf(key, row);
+    if (dup) {
+      var dw = el('div', 'dupwarn');
+      var dt = el('span'); dt.textContent = '⚠ Same name and amount as ' + (dup.no ? '#' + dup.no : 'another line') + ' — pasted twice? ';
+      var dk = el('button', 'chip'); dk.textContent = 'It is different';
+      dk.addEventListener('click', function () { row.dupOk = true; save(); renderAll(); });
+      dw.appendChild(dt); dw.appendChild(dk); entry.appendChild(dw);
+    }
+
+    if (posKey && row.src !== 'fixed' && row.ok && hasAmount(row)) {
+      var side = key, pay = el('div', 'pay'), left = balP(row);
+      if (row.paid.length) {
+        var sm = el('div', 'paysum');
+        sm.textContent = settled ? 'Settled ✓  (paid ₹' + fmt(paidP(row) / 100) + ')' : 'Paid ₹' + fmt(paidP(row) / 100) + '  ·  Balance ₹' + fmt(left / 100);
+        pay.appendChild(sm);
+        row.paid.forEach(function (pm) {
+          var h = el('button', 'chip hist');
+          h.textContent = '− ₹' + fmt(pm.a) + ' ✕';
+          h.addEventListener('click', function () {
+            ask('Remove this payment?', '₹' + fmt(pm.a) + ' on ' + (row.name || 'this order'), 'Remove', function () {
+              row.paid = row.paid.filter(function (x) { return x !== pm; }); save(); renderAll();
+            });
+          });
+          pay.appendChild(h);
+        });
+      }
+      if (left > 0) {
+        var ob = el('button', 'chip');
+        ob.textContent = openPay === row.id ? 'Close' : (row.paid.length ? 'Another part payment' : 'Part payment');
+        ob.addEventListener('click', function () { openPay = openPay === row.id ? null : row.id; renderAll(); });
+        pay.appendChild(ob);
+        if (openPay === row.id) {
+          var f = el('div', 'payform');
+          var pi = el('input'); pi.type = 'number'; pi.inputMode = 'decimal'; pi.step = '0.01'; pi.placeholder = 'Amount paid now';
+          var full = el('button', 'chip'); full.textContent = 'Full balance ₹' + fmt(left / 100);
+          full.addEventListener('click', function () { pi.value = String(left / 100); });
+          var go = el('button', 'chip go'); go.textContent = 'Record';
+          go.addEventListener('click', function () { if (recordPay(side, row, parseFloat(pi.value))) openPay = null, renderAll(); });
+          f.appendChild(pi); f.appendChild(full); f.appendChild(go);
+          pay.appendChild(f);
+        }
+      }
+      var cm = el('button', 'chip'); cm.textContent = 'Copy message';
+      cm.addEventListener('click', function () { copyText(orderMsg(row), 'Message copied'); });
+      pay.appendChild(cm);
+      entry.appendChild(pay);
+    }
 
     if (!row.ok) {
       vbox = el('div', 'verify');
@@ -882,9 +1086,15 @@
   }
 
   function renderList(key) {
-    var c = $('rows-' + key);
+    if (key === 'out' || key === 'in') numberRows(key);
+    var c = $('rows-' + key), posList = key === 'out' || key === 'in';
     c.innerHTML = '';
-    getList(key).forEach(function (row) { c.appendChild(buildEntry(key, row)); });
+    var hidden = 0;
+    getList(key).forEach(function (row) {
+      if (posList && !rowMatches(row)) { hidden += 1; return; }
+      c.appendChild(buildEntry(key, row));
+    });
+    if (posList) { hiddenCount[key] = hidden; }
   }
 
   function renderStageMeta(tab) {
@@ -930,11 +1140,103 @@
     renderTotals();
     renderStageMeta('out'); renderStageMeta('in');
     renderNotice('out'); renderNotice('in');
+    renderQuick(); renderFindInfo(); renderHistory();
   }
+
+  /* ---------- quick part payment by order number ---------- */
+  function renderQuick() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) { b.classList.toggle('on', b.getAttribute('data-q') === qSide); });
+    var no = parseInt($('q-no').value, 10), info = $('q-info'), r = isNaN(no) ? null : findNo(qSide, no);
+    if (isNaN(no)) { info.textContent = 'Type the order number shown next to the name (#1, #2 …).'; info.className = 'hint'; return; }
+    if (!r) { info.textContent = 'No order #' + no + ' on the ' + (qSide === 'out' ? 'Pay (OUT)' : 'Collect (IN)') + ' side.'; info.className = 'hint bad'; return; }
+    info.className = 'hint';
+    info.textContent = '#' + r.no + ' ' + (r.name || '—') + ' · order ₹' + fmt(parseFloat(r.amount)) + ((r.paid || []).length ? ' · paid ₹' + fmt(paidP(r) / 100) : '') + ' · balance ₹' + fmt(balP(r) / 100);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) {
+    b.addEventListener('click', function () { qSide = b.getAttribute('data-q'); renderQuick(); });
+  });
+  $('q-no').addEventListener('input', renderQuick);
+  $('q-full').addEventListener('click', function () {
+    var r = findNo(qSide, parseInt($('q-no').value, 10));
+    if (!r) { toast('Type a valid order number first'); return; }
+    if (balP(r) > 0) $('q-amt').value = String(balP(r) / 100);
+  });
+  $('q-go').addEventListener('click', function () {
+    var no = parseInt($('q-no').value, 10), r = isNaN(no) ? null : findNo(qSide, no);
+    if (!r) { toast('Type a valid order number first'); return; }
+    if (recordPay(qSide, r, parseFloat($('q-amt').value))) { $('q-amt').value = ''; $('q-no').value = ''; renderQuick(); }
+  });
+
+  /* ---------- search / filter ---------- */
+  function renderFindInfo() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) { b.classList.toggle('on', b.getAttribute('data-f') === fMode); });
+    var h = hiddenCount.out + hiddenCount.in;
+    $('f-info').textContent = (fText.trim() || fMode !== 'all') ? (h ? h + ' line' + (h > 1 ? 's' : '') + ' hidden by the search. Totals still count every line.' : 'Everything matches.') : '';
+  }
+  $('f-text').addEventListener('input', function () { fText = this.value; renderList('out'); renderList('in'); renderFindInfo(); });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) {
+    b.addEventListener('click', function () { fMode = b.getAttribute('data-f'); renderList('out'); renderList('in'); renderFindInfo(); });
+  });
+
+  /* ---------- history ---------- */
+  function renderHistory() {
+    var box = $('hist-list');
+    if (!state.history.length) { box.innerHTML = ''; var e0 = el('div', 'hint'); e0.textContent = 'No saved days yet. On the Position tab tap “Save day” at the end of the day.'; box.appendChild(e0); return; }
+    box.innerHTML = '';
+    state.history.forEach(function (h) {
+      var d = el('details', 'hday'), sm = el('summary');
+      var diff = Math.round((h.iP - h.oP) * 100) / 100;
+      var lab = diff === 0 ? 'Balanced' : diff < 0 ? 'Short ' + fmt(Math.abs(diff)) : 'Excess ' + fmt(diff);
+      var open = h.out.filter(function (r) { return r.bal > 0; }).length + h.in.filter(function (r) { return !r.fixed && r.bal > 0; }).length;
+      sm.innerHTML = '';
+      var a = el('b'); a.textContent = dayLabel(h.d);
+      var b2 = el('span', 'hsum' + (diff < 0 ? ' neg' : diff > 0 ? ' pos' : '')); b2.textContent = lab;
+      sm.appendChild(a); sm.appendChild(b2); d.appendChild(sm);
+      var meta = el('div', 'hint'); meta.textContent = 'OUT ₹' + fmt(h.oP) + ' · IN ₹' + fmt(h.iP) + ' · ' + open + ' open order' + (open === 1 ? '' : 's');
+      d.appendChild(meta);
+      [['OUT', h.out], ['IN', h.in]].forEach(function (g) {
+        var hd = el('div', 'hhead'); hd.textContent = g[0]; d.appendChild(hd);
+        if (!g[1].length) { var n = el('div', 'hint'); n.textContent = 'No lines'; d.appendChild(n); }
+        g[1].forEach(function (r) {
+          var ln = el('div', 'hline');
+          var l1 = el('span'); l1.textContent = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + (r.paid > 0 ? ' (paid ₹' + fmt(r.paid) + ' of ' + fmt(r.amt) + ')' : '');
+          var l2 = el('span', 'n'); l2.textContent = fmt(r.bal);
+          ln.appendChild(l1); ln.appendChild(l2); d.appendChild(ln);
+        });
+      });
+      var rm = el('button', 'chip'); rm.textContent = 'Delete this day';
+      rm.addEventListener('click', function () {
+        ask('Delete this saved day?', dayLabel(h.d), 'Delete', function () { state.history = state.history.filter(function (x) { return x !== h; }); save(); renderHistory(); });
+      });
+      d.appendChild(rm);
+      box.appendChild(d);
+    });
+  }
+  $('save-day').addEventListener('click', function () {
+    var upd = saveDay(); toast(upd ? 'Today updated in History' : 'Saved to History');
+  });
+  $('new-day').addEventListener('click', function () {
+    ask('Save today and start a new day?', 'Today is saved to History. Orders with a balance stay (with the balance as their amount); settled orders, SHOP and OFFICE amounts are cleared.', 'Save & start', function () {
+      saveDay(); var n = carryOver(); save(); renderAll(); toast('Saved. ' + n + ' open order' + (n === 1 ? '' : 's') + ' carried over');
+    });
+  });
+  $('copy-all').addEventListener('click', function () {
+    var L = ['Cash position — ' + dayLabel(todayKey()), ''];
+    [['OUT', 'out'], ['IN', 'in']].forEach(function (g) {
+      L.push(g[0]);
+      state[g[1]].filter(function (r) { return hasAmount(r) && balP(r) > 0; }).forEach(function (r) {
+        L.push((r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ': ' + fmt(balP(r) / 100) + (paidP(r) > 0 ? ' (part paid, order ' + fmt(parseFloat(r.amount)) + ')' : ''));
+      });
+      L.push('Total ' + g[0] + ': ' + fmt(sideTotalPaise(g[1]) / 100), '');
+    });
+    var d = sideTotalPaise('in') - sideTotalPaise('out');
+    L.push(d === 0 ? 'Balanced' : d < 0 ? 'Short ' + fmt(Math.abs(d) / 100) : 'Excess ' + fmt(d / 100));
+    copyText(L.join('\n'), 'Position copied as text');
+  });
 
   /* ---------- tabs ---------- */
   function showTab(key) {
-    ['position', 'out', 'in'].forEach(function (k) { $('tab-' + k).hidden = (k !== key); });
+    ['position', 'out', 'in', 'history'].forEach(function (k) { $('tab-' + k).hidden = (k !== key); });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === key);
     });
@@ -1053,7 +1355,7 @@
   $('clear-btn').addEventListener('click', function () { confirmBar.classList.add('show'); });
   $('confirm-no').addEventListener('click', function () { confirmBar.classList.remove('show'); });
   $('confirm-yes').addEventListener('click', function () {
-    state.in = freshIn(); state.out = [blankRow()];
+    state.in = freshIn(); state.out = [blankRow()]; state.seq = { in: 0, out: 0 }; openPay = null;
     lastRemoved = null;
     save(); renderAll();
     confirmBar.classList.remove('show');
@@ -1076,7 +1378,7 @@
 
   function drawPositionImage() {
     var W = 1080, pad = 56, rowH = 66;
-    var outRows = state.out.filter(hasAmount), inRows = state.in.filter(hasAmount);
+    var outRows = state.out.filter(function (r) { return hasAmount(r) && balP(r) > 0; }), inRows = state.in.filter(function (r) { return hasAmount(r) && balP(r) > 0; });
     var oP = sideTotalPaise('out'), iP = sideTotalPaise('in'), diffP = iP - oP;
     var secH = function (n) { return 92 + Math.max(1, n) * rowH + 84; };
     var H = 200 + secH(outRows.length) + 24 + secH(inRows.length) + 24 + 250 + 70;
@@ -1115,11 +1417,11 @@
       rows.forEach(function (r, i) {
         if (i % 2 === 0) { x.fillStyle = '#f8f7f1'; x.fillRect(pad - 14, y, W - 2 * (pad - 14), rowH); }
         x.fillStyle = '#22251e'; x.font = '30px ' + SANS; x.textAlign = 'left';
-        var amtTxt = fmt(parseFloat(r.amount));
+        var amtTxt = fmt(balP(r) / 100);
         x.font = '600 32px ' + SERIF;
         var aw = x.measureText(amtTxt).width;
         x.font = '30px ' + SANS;
-        x.fillText(trimText(x, r.name || '—', W - 2 * pad - aw - 50), pad + 8, y + 44);
+        x.fillText(trimText(x, (r.no ? '#' + r.no + '  ' : '') + (r.name || '—') + (r.paid && r.paid.length ? '  (part paid)' : ''), W - 2 * pad - aw - 50), pad + 8, y + 44);
         x.font = '600 32px ' + SERIF; x.textAlign = 'right';
         x.fillText(amtTxt, W - pad - 8, y + 44);
         y += rowH;
