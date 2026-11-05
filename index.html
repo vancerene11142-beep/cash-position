@@ -81,7 +81,7 @@
   /* segmented tabs */
   .tabs { display: flex; gap: 4px; padding: 4px; margin-bottom: 14px; background: var(--neutral-bg); border-radius: 13px; }
   .tab {
-    flex: 1; padding: 10px 6px; font-size: 14px; font-family: inherit; border: none; border-radius: 10px;
+    flex: 1; padding: 10px 4px; font-size: 13px; font-family: inherit; border: none; border-radius: 10px;
     background: transparent; color: var(--ink-soft); cursor: pointer; font-weight: 500;
   }
   .tab.active { background: var(--panel); color: var(--ink); box-shadow: var(--shadow); font-weight: 600; }
@@ -151,6 +151,9 @@
   .hline { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
   .hline .n { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .actions { flex-wrap: wrap; }
+  .chkrow { display: flex; gap: 6px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  .chktx { flex: 1; min-width: 0; }
+  .hint.warnt { color: var(--warn); }
   .quick h2 { margin: 0 0 8px; }
   .qseg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
   .qseg button { padding: 9px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; font-weight: 600; }
@@ -297,6 +300,7 @@
     <button class="tab active" data-tab="position" role="tab">Position</button>
     <button class="tab" data-tab="out" role="tab">Pay<span class="badge" id="badge-out" hidden></span></button>
     <button class="tab" data-tab="in" role="tab">Collect<span class="badge" id="badge-in" hidden></span></button>
+    <button class="tab" data-tab="check" role="tab">Check<span class="badge" id="badge-check" hidden></span></button>
     <button class="tab" data-tab="history" role="tab">History</button>
   </div>
 
@@ -356,6 +360,23 @@
       <button class="yes" id="confirm-yes">Clear</button>
       <button class="no" id="confirm-no">Cancel</button>
     </div>
+  </section>
+
+  <!-- CHECK -->
+  <section id="tab-check" hidden>
+    <div class="card">
+      <h2>Payments not yet in the cash book</h2>
+      <div class="hint">Every part payment and “Paid in full” you record lands here. Tap “In book ✓” when you have written it in the cash book, or paste the cash book rows below and the tool ticks the ones it finds.</div>
+      <div id="chk-list"></div>
+    </div>
+    <div class="card">
+      <h2>Compare with cash book</h2>
+      <div class="hint">Paste the cash book rows (copy them from your Cash Entry app or Excel, one row per line). Only payments that are missing stay flagged. Other entries in the cash book are ignored.</div>
+      <textarea id="chk-paste" placeholder="Paste cash book rows here" style="width:100%;min-height:110px;margin-top:8px;font:inherit;padding:10px;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg);color:var(--ink)"></textarea>
+      <div class="actions"><button class="btn primary grow" id="chk-go">Compare</button><button class="btn" id="chk-clear">Clear</button></div>
+      <div class="notice" id="chk-res" hidden></div>
+    </div>
+    <div class="card" id="chk-done"></div>
   </section>
 
   <!-- HISTORY -->
@@ -727,7 +748,7 @@
   var STORE_KEY = 'cashCheck.v2';
   var OLD_KEY = 'cashCheck.v1';
   var DEFAULT_BOX = 1000;
-  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [] };
+  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [], paylog: [] };
   var hiddenCount = { in: 0, out: 0 }, openPay = null, qSide = 'out', fText = '', fMode = 'all';
   var notices = { in: null, out: null };
   var lastRemoved = null;
@@ -773,7 +794,7 @@
       ok: r.ok !== false, src: r.src || 'manual', reason: r.reason || '',
       alts: Array.isArray(r.alts) ? r.alts : [], raw: r.raw || '', meta: r.meta || '',
       no: r.no > 0 ? +r.no : 0, dupOk: !!r.dupOk,
-      paid: Array.isArray(r.paid) ? r.paid.filter(function (x) { return x && x.a > 0; }).map(function (x) { return { a: +x.a, t: x.t || 0 }; }) : []
+      paid: Array.isArray(r.paid) ? r.paid.filter(function (x) { return x && x.a > 0; }).map(function (x) { return { a: +x.a, t: x.t || 0, id: x.id || '' }; }) : []
     };
   }
 
@@ -800,6 +821,7 @@
           if (p.box > 0) state.box = p.box;
           if (!p.boxMig && state.box === 100000) state.box = DEFAULT_BOX;   // old default, 1 box is now 1,000
           if (Array.isArray(p.history)) state.history = p.history;
+          if (Array.isArray(p.paylog)) state.paylog = p.paylog.filter(function (x) { return x && x.a > 0; });
           if (p.seq && p.seq.in >= 0 && p.seq.out >= 0) state.seq = { in: +p.seq.in, out: +p.seq.out };
           loaded = true;
         }
@@ -812,6 +834,13 @@
         }
       }
     } catch (e) {}
+    ['in', 'out'].forEach(function (k) {
+      state[k].forEach(function (r) {
+        (r.paid || []).forEach(function (pm) {
+          if (!pm.id) { pm.id = nid(); state.paylog.push({ id: pm.id, side: k, no: r.no || 0, name: r.name || '', a: pm.a, t: pm.t || Date.now(), done: false, how: '' }); }
+        });
+      });
+    });
     // anything still unconfirmed goes back to its review list, never into Position
     ['in', 'out'].forEach(function (k) {
       var keep = [];
@@ -905,6 +934,7 @@
     return co.length + ci.length;
   }
 
+  function dropLog(id) { state.paylog = state.paylog.filter(function (x) { return x.id !== id; }); }
   function findNo(side, no) {
     return state[side].filter(function (r) { return r.src !== 'fixed' && r.no === no; })[0] || null;
   }
@@ -912,13 +942,14 @@
     var a = money(amt);
     if (!(a > 0)) { toast('Enter the amount paid'); return false; }
     if (paise(a) > balP(row)) { toast('That is more than the balance ₹' + fmt(balP(row) / 100)); return false; }
-    var rec = { a: a, t: Date.now() };
+    var rec = { a: a, t: Date.now(), id: nid() };
     if (!Array.isArray(row.paid)) row.paid = [];
     row.paid.push(rec);
+    state.paylog.push({ id: rec.id, side: side, no: row.no || 0, name: row.name || '', a: a, t: rec.t, done: false, how: '' });
     save(); renderAll();
     var left = balP(row) / 100;
     toast('#' + row.no + ' ' + (row.name || '') + ': ₹' + fmt(a) + (left > 0 ? ' · balance ₹' + fmt(left) : ' · settled'), function () {
-      row.paid = row.paid.filter(function (x) { return x !== rec; }); save(); renderAll();
+      row.paid = row.paid.filter(function (x) { return x !== rec; }); dropLog(rec.id); save(); renderAll();
     });
     return true;
   }
@@ -1021,13 +1052,17 @@
           h.textContent = '− ₹' + fmt(pm.a) + ' ✕';
           h.addEventListener('click', function () {
             ask('Remove this payment?', '₹' + fmt(pm.a) + ' on ' + (row.name || 'this order'), 'Remove', function () {
-              row.paid = row.paid.filter(function (x) { return x !== pm; }); save(); renderAll();
+              row.paid = row.paid.filter(function (x) { return x !== pm; }); dropLog(pm.id); save(); renderAll();
             });
           });
           pay.appendChild(h);
         });
       }
       if (left > 0) {
+        var pf = el('button', 'chip go');
+        pf.textContent = 'Paid in full';
+        pf.addEventListener('click', function () { recordPay(side, row, left / 100); });
+        pay.appendChild(pf);
         var ob = el('button', 'chip');
         ob.textContent = openPay === row.id ? 'Close' : (row.paid.length ? 'Another part payment' : 'Part payment');
         ob.addEventListener('click', function () { openPay = openPay === row.id ? null : row.id; renderAll(); });
@@ -1140,7 +1175,7 @@
     renderTotals();
     renderStageMeta('out'); renderStageMeta('in');
     renderNotice('out'); renderNotice('in');
-    renderQuick(); renderFindInfo(); renderHistory();
+    renderQuick(); renderFindInfo(); renderHistory(); renderCheck();
   }
 
   /* ---------- quick part payment by order number ---------- */
@@ -1177,6 +1212,95 @@
   Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) {
     b.addEventListener('click', function () { fMode = b.getAttribute('data-f'); renderList('out'); renderList('in'); renderFindInfo(); });
   });
+
+  /* ---------- check payments against the cash book ---------- */
+  function clk(t) { try { return new Date(t).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; } }
+  function parseBook(text) {
+    var rows = [];
+    String(text).replace(/[\u200e\u200f\ufeff]/g, '').split(/\r?\n/).forEach(function (line) {
+      if (!line.trim()) return;
+      var c = line.split('\t').map(function (x) { return x.trim(); });
+      if (c.length >= 3) {
+        var hasDate = /^\d{1,2}[-\/ ][A-Za-z]{3}[-\/ ]\d{4}$|^\d{4}-\d{2}-\d{2}$|^\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}$/.test(c[0]);
+        var o = num(c[2]), i = num(c[3]);
+        rows.push({ hay: (hasDate ? c[1] : c[0] + ' ' + c[1]).toLowerCase(), out: isNaN(o) ? 0 : o, inn: isNaN(i) ? 0 : i, any: null, used: false });
+      } else {
+        var any = (line.match(/\d[\d,]*(?:\.\d+)?/g) || []).map(num).filter(function (v) { return v >= 10; });
+        if (any.length) rows.push({ hay: line.toLowerCase(), out: 0, inn: 0, any: any, used: false });
+      }
+    });
+    return rows;
+  }
+  function nameHit(name, hay) {
+    var toks = String(name || '').toLowerCase().split(/[^a-z]+/).filter(function (t) { return t.length >= 3; });
+    return toks.some(function (t) { return hay.indexOf(t) >= 0; });
+  }
+  function runCompare(text) {
+    var rows = parseBook(text), pend = state.paylog.filter(function (x) { return !x.done; }), found = 0, weak = 0;
+    pend.sort(function (a, b) { return a.t - b.t; });
+    pend.forEach(function (e) {
+      var cands = rows.filter(function (r) {
+        if (r.used) return false;
+        var pa = paise(e.a);
+        if (r.any) return r.any.some(function (v) { return paise(v) === pa; });
+        return paise(e.side === 'out' ? r.out : r.inn) === pa && pa > 0;
+      });
+      if (!cands.length) return;
+      var pick = cands.filter(function (r) { return nameHit(e.name, r.hay); })[0], named = !!pick;
+      if (!pick) pick = cands[0];
+      pick.used = true; e.done = true; e.how = named ? 'auto' : 'amount'; found += 1; if (!named) weak += 1;
+    });
+    save(); renderAll();
+    return { rows: rows.length, checked: pend.length, found: found, weak: weak, missing: pend.length - found };
+  }
+  function renderCheck() {
+    var pend = state.paylog.filter(function (x) { return !x.done; }).sort(function (a, b) { return a.t - b.t; });
+    var badge = $('badge-check');
+    if (pend.length) { badge.hidden = false; badge.textContent = pend.length; } else badge.hidden = true;
+    var box = $('chk-list'); box.innerHTML = '';
+    if (!pend.length) { var e0 = el('div', 'hint'); e0.textContent = 'Every payment is ticked as in the cash book.'; box.appendChild(e0); }
+    pend.forEach(function (e) {
+      var ln = el('div', 'chkrow'), tx = el('div', 'chktx');
+      tx.innerHTML = '';
+      var b1 = el('b'); b1.textContent = (e.no ? '#' + e.no + ' ' : '') + (e.name || '—');
+      var m1 = el('div', 'hint'); m1.textContent = (e.side === 'out' ? 'Paid' : 'Collected') + ' ₹' + fmt(e.a) + ' · ' + clk(e.t);
+      tx.appendChild(b1); tx.appendChild(m1);
+      var ok = el('button', 'chip go'); ok.textContent = 'In book ✓';
+      ok.addEventListener('click', function () { e.done = true; e.how = 'manual'; save(); renderAll(); });
+      var ig = el('button', 'chip'); ig.textContent = 'Ignore';
+      ig.addEventListener('click', function () { e.done = true; e.how = 'ignored'; save(); renderAll(); });
+      ln.appendChild(tx); ln.appendChild(ok); ln.appendChild(ig); box.appendChild(ln);
+    });
+    var done = state.paylog.filter(function (x) { return x.done; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 40);
+    var dbox = $('chk-done'); dbox.innerHTML = ''; dbox.hidden = !done.length;
+    if (done.length) {
+      var d = el('details'), sm = el('summary'); sm.textContent = 'Already checked (' + done.length + ')'; d.appendChild(sm);
+      done.forEach(function (e) {
+        var ln = el('div', 'chkrow'), tx = el('div', 'chktx');
+        var b1 = el('span'); b1.textContent = (e.no ? '#' + e.no + ' ' : '') + (e.name || '—') + ' · ₹' + fmt(e.a) + ' · ' + clk(e.t);
+        var m1 = el('div', 'hint'); m1.textContent = e.how === 'auto' ? 'found in cash book' : e.how === 'amount' ? 'found by amount only (name not seen) — check' : e.how === 'ignored' ? 'ignored' : 'ticked by you';
+        if (e.how === 'amount') m1.className = 'hint warnt';
+        tx.appendChild(b1); tx.appendChild(m1);
+        var bk = el('button', 'chip'); bk.textContent = 'Put back';
+        bk.addEventListener('click', function () { e.done = false; e.how = ''; save(); renderAll(); });
+        ln.appendChild(tx); ln.appendChild(bk); d.appendChild(ln);
+      });
+      var clr = el('button', 'chip'); clr.textContent = 'Clear checked list';
+      clr.addEventListener('click', function () { ask('Clear the checked list?', 'Only payments already ticked are removed. Missing ones stay.', 'Clear', function () { state.paylog = state.paylog.filter(function (x) { return !x.done; }); save(); renderAll(); }); });
+      d.appendChild(clr); dbox.appendChild(d);
+    }
+  }
+  $('chk-go').addEventListener('click', function () {
+    var t = $('chk-paste').value;
+    if (!t.trim()) { toast('Paste the cash book rows first'); return; }
+    var r = runCompare(t), n = $('chk-res');
+    n.className = 'notice';
+    n.hidden = false;
+    n.textContent = r.checked ? (r.found + ' of ' + r.checked + ' payments found in the cash book' + (r.weak ? ' (' + r.weak + ' by amount only)' : '') + '. ' + (r.missing ? r.missing + ' missing: listed above.' : 'Nothing is missing.')) : 'There were no unchecked payments to compare.';
+    $('chk-paste').value = '';
+    window.scrollTo(0, 0);
+  });
+  $('chk-clear').addEventListener('click', function () { $('chk-paste').value = ''; $('chk-res').hidden = true; });
 
   /* ---------- history ---------- */
   function renderHistory() {
@@ -1236,7 +1360,7 @@
 
   /* ---------- tabs ---------- */
   function showTab(key) {
-    ['position', 'out', 'in', 'history'].forEach(function (k) { $('tab-' + k).hidden = (k !== key); });
+    ['position', 'out', 'in', 'check', 'history'].forEach(function (k) { $('tab-' + k).hidden = (k !== key); });
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === key);
     });
