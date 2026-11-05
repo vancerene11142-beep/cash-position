@@ -398,19 +398,21 @@
   function normKey(s) { return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
   function addReason(a, b) { return a ? a + ' \u00b7 ' + b : b; }
 
-  var HDR  = /^\s*\[?\s*\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4},?\s+\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?\s*\]?\s*(?:[-\u2013\u2014]\s*)?[^:\n]{1,40}?:\s?/i;
-  var HDR2 = /^\s*\[\s*\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?,?\s*\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4}\s*\]\s*[^:\n]{1,40}?:\s?/i;
+  var HDR  = /^\s*\[?\s*\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?,?\s+\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?\s*\]?\s*(?:[-\u2013\u2014]\s*)?[^:\n]{1,40}?:\s?/i;
+  var HDR2 = /^\s*\[\s*\d{1,2}[:.]\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?,?\s*\d{1,2}[\/.\-]\d{1,2}(?:[\/.\-]\d{2,4})?\s*\]\s*[^:\n]{1,40}?:\s?/i;
   var NUMB = /^\s*\d{1,3}\s*[\])]\s*\S/;
   var SEP  = /^\s*(?:[\u2715\u2716\u274c\u274e\u00d7]|[-=_*]{3,})\s*$/;
   var DEAL_RE = /^\s*(.+?)\s+(\d[\d,]*(?:\.\d+)?)\s*[*x\u00d7]\s*(\d[\d,]*(?:\.\d+)?)\s*\(\s*([PpSs])\s*\)\s*=\s*(\d[\d,]*(?:\.\d+)?)\s*$/;
   var PHONE_RE = /(^|[^\d,.])((?:\+?91[\s-]?)?[6-9]\d{9})(?![\d,])/g;
   var DENOM_RE = /\(\s*\d+\s*(?:\u20b9|rs\.?)\s*\)/gi;
-  var SERIAL_RE = /(?:\d+\s*(?:rs\.?|\u20b9)\s*)?\d{1,2}[A-Za-z]{1,2}\s*\d{6}(?:\s*(?:rs\.?|\u20b9)\s*\d{1,2}(?![\d.,]|\s*(?:box|bx|lakh|lac|cr|k\b)))?/gi;
+  var SERIAL_RE = /(?:(?:\d+\s*(?:rs\.?|\u20b9)|(?:rs\.?|\u20b9)\s*\d{1,2})\s*[-\u2013:]?\s*)?\d{1,2}[A-Za-z]{1,2}\s*\d{6}(?:\s*(?:rs\.?|\u20b9)\s*\d{1,2}(?![\d.,]|\s*(?:box|bx|lakh|lac|cr|k\b)))?/gi;
+  var NOISE_RE = /(?:\b(?:token|tkn)\s*(?:no\.?|number|#)?\s*[:.\-]?\s*[A-Za-z0-9]*\d[A-Za-z0-9]*|<\s*\d+\s*>|\b\d{4,6}[ \t]+\d{4,6}\b|(?:^|\s)\d{1,2}\s*rs\b\.?)/gi;
+  var EMOJI_RE = /[\u{1F000}-\u{1FFFF}\u2600-\u27BF\uFE0F\u200d]/gu;
   var COMPLETE_RE = /\b(paid|done|completed?|collected|received|cleared)\b/i;
   var UNIT_MULT = { lakh: 1e5, lakhs: 1e5, lac: 1e5, lacs: 1e5, cr: 1e7, crore: 1e7, crores: 1e7, k: 1e3 };
 
   var STOP = {};
-  ('amt amount give total msg no rs bx box boxes paid done forwarded bal balance note notes more token tokens ok thanks inr please pls collected received cleared')
+  ('ph phone mob mobile whatsapp whtsapp tel contact tkn amt amount give total msg no rs bx box boxes paid done forwarded bal balance note notes more token tokens ok thanks inr please pls collected received cleared')
     .split(' ').forEach(function (w) { STOP[w] = 1; });
 
   // A blank line (or a divider such as the cross mark) ends a message. A chunk that cannot stand
@@ -432,7 +434,14 @@
         cur.push(l);
       });
       push();
-      return blocks;
+      // a later message with no name (just "247.41 bx") belongs to the message above it, if that one has no amount yet
+      var merged = [];
+      blocks.forEach(function (b) {
+        var prev = merged.length ? merged[merged.length - 1] : null;
+        if (prev && !findName(b.replace(EMOJI_RE, ' ')) && !hasAmountWord(prev)) merged[merged.length - 1] = prev + '\n' + b;
+        else merged.push(b);
+      });
+      return merged;
     }
     var numbered = lines.filter(function (l) { return NUMB.test(l); }).length;
     var chunks = [], buf = [], hard = false;
@@ -452,6 +461,11 @@
       if (starts) blocks.push(c.text); else blocks[blocks.length - 1] += '\n' + c.text;
     });
     return blocks;
+  }
+
+  function hasAmountWord(b) {
+    var r = messageRow(b, 'in', 1);
+    return !!(r.row && r.row.amount !== '');
   }
 
   function findName(text) {
@@ -501,13 +515,13 @@
 
   function messageRow(block, tab, boxVal) {
     var phones = [];
-    var t = block.replace(/^[ \t]*\d{1,3}[ \t]*[\])][ \t]*/gm, '');
+    var t = block.replace(/[*~]/g, ' ').replace(EMOJI_RE, ' ').replace(/^[ \t]*\d{1,3}[ \t]*(?:[\])]|\.(?=[A-Za-z]))[ \t]*/gm, '');
     t = t.replace(PHONE_RE, function (m, pre, ph) {
       var d = ph.replace(/\D/g, '').slice(-10);
       if (phones.indexOf(d) < 0) phones.push(d);
       return pre + ' ';
     });
-    t = t.replace(DENOM_RE, ' ').replace(SERIAL_RE, ' ');
+    t = t.replace(DENOM_RE, ' ').replace(NOISE_RE, ' ').replace(SERIAL_RE, ' ');
     var name = findName(t);
     var flat = t.replace(/\s+/g, ' ');
     var skipText = block.replace(/\s+/g, ' ').trim().slice(0, 80);
@@ -530,7 +544,7 @@
       else if (label === 'total') totals.push(c);
       else if (label === 'give') gives.push(c);
       else if (label === 'rs') rupees.push({ val: val, short: false, text: c.text });
-      else if (val >= 100) bare.push(c);
+      else if (val >= 100 || /\.\d{2,}$/.test(m[1])) bare.push(c);
     }
 
     var reasons = [], alts = [], amount = '', ok = true, info = '';
@@ -633,7 +647,7 @@
 
   function parseText(text, tab, boxVal, existingKeys) {
     var rows = [], skipped = [];
-    var clean = String(text).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').replace(/[\u00a0\u202f]/g, ' ');
+    var clean = String(text).replace(/[\u{1D400}-\u{1D7FF}]/gu, function (c) { return c.normalize('NFKC'); }).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').replace(/[\u00a0\u202f]/g, ' ');
     var rest = [];
     clean.split(/\r?\n/).forEach(function (line) {
       var body = line.replace(HDR, '').replace(HDR2, '');
