@@ -477,6 +477,7 @@
   var NUMB = /^\s*\d{1,3}\s*[\])]\s*\S/;
   var SEP  = /^\s*(?:[\u2715\u2716\u274c\u274e\u00d7]|[-=_*]{3,})\s*$/;
   var DEAL_RE = /^\s*(.+?)\s+(\d[\d,]*(?:\.\d+)?)\s*[*x\u00d7]\s*(\d[\d,]*(?:\.\d+)?)\s*\(\s*([PpSs])\s*\)\s*=\s*(\d[\d,]*(?:\.\d+)?)\s*$/;
+  var AT_RE = /^\s*(.+?)\s*[-\u2013\u2014:]\s*(\d[\d,]*(?:\.\d+)?)\s*@\s*(\d[\d,]*(?:\.\d+)?)\s*$/;
   var PHONE_RE = /(^|[^\d,.])((?:\+?91[\s-]?)?[6-9]\d{9})(?![\d,])/g;
   var DENOM_RE = /\(\s*\d+\s*(?:\u20b9|rs\.?)\s*\)/gi;
   var SERIAL_RE = /(?:(?:\d+\s*(?:rs\.?|\u20b9)|(?:rs\.?|\u20b9)\s*\d{1,2})\s*[-\u2013:]?\s*)?\d{1,2}[A-Za-z]{1,2}\s*\d{6}(?:\s*(?:rs\.?|\u20b9)\s*\d{1,2}(?![\d.,]|\s*(?:box|bx|lakh|lac|cr|k\b)))?/gi;
@@ -585,6 +586,41 @@
       reasons.push('Marked (' + pS + ') but pasted in ' + (tab === 'out' ? 'Pay' : 'Collect'));
     }
     return { name: name, amount: amount, ok: ok, src: 'deal', reason: reasons.join(' \u00b7 '), alts: alts, raw: raw, meta: m[2] + ' \u00d7 ' + m[3] + ' (' + pS + ')' };
+  }
+
+  // "Fomi- 1000 @ 27.38": amount = quantity x rate. Rate under 10 is a divide deal, so it must be confirmed.
+  function atRow(m, raw) {
+    var name = m[1].trim(), qty = num(m[2]), rate = num(m[3]), calc = money(qty * rate), ok = true, reason = '', alts = [], amount = String(calc);
+    if (rate < 10) {
+      ok = false; amount = '';
+      reason = 'Rate under 10 \u2014 multiply or divide?';
+      alts = [
+        { label: '\u20b9' + fmt(calc) + ' (qty \u00d7 rate)', value: calc },
+        { label: '\u20b9' + fmt(qty / rate) + ' (qty \u00f7 rate)', value: money(qty / rate) }
+      ];
+    }
+    return { name: name, amount: amount, ok: ok, src: 'deal', reason: reason, alts: alts, raw: raw, meta: m[2] + ' \u00d7 ' + m[3], qty: qty, rate: rate };
+  }
+
+  // the same name several times in one paste becomes one line with the total
+  function mergeDeals(rows) {
+    var out = [], map = {};
+    rows.forEach(function (r) {
+      if (r.src !== 'deal' || !r.ok || !r.name || r.amount === '') { out.push(r); return; }
+      var k = normKey(r.name), g = map[k];
+      if (!g) { g = map[k] = { first: r, parts: [] }; out.push(r); }
+      g.parts.push(r);
+    });
+    Object.keys(map).forEach(function (k) {
+      var g = map[k]; if (g.parts.length < 2) return;
+      var tot = 0; g.parts.forEach(function (p) { tot += paise(parseFloat(p.amount)); });
+      var f = g.first;
+      f.amount = String(tot / 100);
+      f.raw = g.parts.map(function (p) { return p.raw; }).join('\n');
+      f.meta = g.parts.length + ' deals added up: ' + g.parts.map(function (p) { return p.meta; }).join(' + ');
+      f.merged = g.parts.length;
+    });
+    return out;
   }
 
   function messageRow(block, tab, boxVal) {
@@ -722,13 +758,24 @@
   function parseText(text, tab, boxVal, existingKeys) {
     var rows = [], skipped = [];
     var clean = String(text).replace(/[\u{1D400}-\u{1D7FF}]/gu, function (c) { return c.normalize('NFKC'); }).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').replace(/[\u00a0\u202f]/g, ' ');
-    var rest = [];
-    clean.split(/\r?\n/).forEach(function (line) {
+    var rest = [], allLines = clean.split(/\r?\n/);
+    var hasHdr = allLines.some(function (l) { return HDR.test(l) || HDR2.test(l); });
+    var block = 0, prevBlank = true;
+    allLines.forEach(function (line) {
+      if (!line.trim()) { prevBlank = true; rest.push(line); return; }
+      if (prevBlank) { block += 1; prevBlank = false; }
       var body = line.replace(HDR, '').replace(HDR2, '');
-      var m = body.match(DEAL_RE);
+      var m = body.match(DEAL_RE), a = m ? null : body.match(AT_RE);
       if (m) rows.push(dealRow(m, tab, body.trim()));
+      else if (a) {
+        // without time stamps the blocks alternate: 1st = purchase (Pay), 2nd = sale (Collect) ...
+        var side = hasHdr ? tab : (block % 2 ? 'out' : 'in');
+        if (side !== tab) skipped.push({ text: body.trim(), why: (side === 'out' ? 'purchase' : 'sale') + ' line \u2014 belongs in the ' + (side === 'out' ? 'Pay' : 'Collect') + ' tab' });
+        else rows.push(atRow(a, body.trim()));
+      }
       else rest.push(line);
     });
+    rows = mergeDeals(rows);
     splitBlocks(rest.join('\n')).forEach(function (b) {
       var r = messageRow(b, tab, boxVal);
       if (r.row) rows.push(r.row); else skipped.push(r.skip);
