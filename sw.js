@@ -1,6 +1,6 @@
 // Offline cache for the app shell only. No customer data is ever cached here;
 // all entries live in the phone's own browser storage.
-var CACHE = 'cash-check-v9';
+var CACHE = 'cash-check-v10';
 var FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {
