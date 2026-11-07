@@ -284,6 +284,40 @@
   .preview img { width: 100%; display: block; border-radius: 12px; background: #fff; }
   .preview-actions { display: flex; gap: 8px; width: 100%; max-width: 560px; }
   .preview-actions a, .preview-actions button { flex: 1; text-align: center; text-decoration: none; }
+
+  /* ---- calmer dashboard ---- */
+  .hero { margin-top: 0; margin-bottom: 10px; padding: 22px 16px 18px; }
+  details.tools .quick h2 { display: none; }
+  .hero .eq { display: none; }
+  .hero .figure { font-size: 44px; margin: 10px 0 4px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 11px 13px; box-shadow: var(--shadow); }
+  .stat span { display: block; font-size: 11.5px; color: var(--ink-soft); letter-spacing: .02em; }
+  .stat b { display: block; margin-top: 3px; font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; font-family: 'Source Serif 4', Georgia, serif; }
+  .stat.out b { color: var(--short); } .stat.in b { color: var(--excess); }
+  details.tools { margin-bottom: 10px; padding: 0; }
+  details.tools > summary { cursor: pointer; padding: 12px 14px; font-size: 13.5px; font-weight: 600; color: var(--ink-soft); list-style: none; }
+  details.tools > summary::-webkit-details-marker { display: none; }
+  details.tools > summary::after { content: '▾'; float: right; }
+  details.tools[open] > summary::after { content: '▴'; }
+  details.tools .quick { padding: 0 14px 14px; }
+  .findbar { padding: 8px; margin-bottom: 10px; }
+  .findbar input { border-color: transparent; background: var(--bg); }
+  .findbar .qseg3 { margin-top: 6px; }
+  .findbar .hint:empty { display: none; }
+  .board { margin-bottom: 4px; }
+  .side { padding: 16px 14px 12px; }
+  .rows { gap: 0; }
+  .entry { padding: 9px 0; border-bottom: 1px solid var(--line); gap: 4px; }
+  .entry:last-child { border-bottom: none; }
+  .row input { border-color: transparent; background: var(--bg); }
+  .pay .chip { border-color: var(--line); color: var(--ink-soft); font-size: 12px; padding: 6px 10px; }
+  .pay .chip.go { color: var(--accent-ink); border-color: var(--accent); }
+  .pay .chip.add { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); font-weight: 600; }
+  .paysum { font-weight: 600; }
+  .subtotal { margin-top: 10px; }
+  .actions { margin-top: 12px; }
+  .btn { border-radius: 13px; }
 </style>
 </head>
 <body>
@@ -312,13 +346,24 @@
 
   <!-- POSITION -->
   <section id="tab-position">
-    <div class="card quick">
+    <div class="summary card balanced hero" id="summary">
+      <span class="pill" id="summary-label">Balanced</span>
+      <div class="figure" id="summary-figure">0.00</div>
+      <div class="eq" id="summary-eq"></div>
+    </div>
+
+    <div class="split">
+      <div class="stat out"><span>To pay (OUT)</span><b id="stat-out">0</b></div>
+      <div class="stat in"><span>Cash in hand (IN)</span><b id="stat-in">0</b></div>
+    </div>
+    <details class="card tools" id="tools"><summary>Part payment by order number</summary>
+    <div class="quick">
       <h2>Part payment</h2>
       <div class="qseg"><button data-q="out" class="on">Pay (OUT)</button><button data-q="in">Collect (IN)</button></div>
       <div class="qrow"><input id="q-no" type="number" inputmode="numeric" min="1" step="1" placeholder="Order #"><input id="q-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount paid now"></div>
       <div class="hint" id="q-info"></div>
       <div class="actions"><button class="btn primary grow" id="q-go">Record</button><button class="btn" id="q-full">Full balance</button></div>
-    </div>
+    </div></details>
     <div class="card findbar">
       <input id="f-text" type="search" placeholder="Search name, # or amount" autocomplete="off">
       <div class="qseg3"><button data-f="all" class="on">All</button><button data-f="open">Open</button><button data-f="settled">Settled</button></div>
@@ -338,12 +383,6 @@
         <button class="addrow" id="add-in">+ Add line</button>
         <div class="subtotal"><span>Total IN</span><span class="amt" id="total-in">0.00</span></div>
       </div>
-    </div>
-
-    <div class="summary card balanced" id="summary">
-      <span class="pill" id="summary-label">Balanced</span>
-      <div class="figure" id="summary-figure">0.00</div>
-      <div class="eq" id="summary-eq"></div>
     </div>
 
     <div class="actions">
@@ -933,11 +972,48 @@
     if (q.charAt(0) === '#') return String(r.no) === q.slice(1);
     return (r.no && String(r.no) === q) || nameKey(r).indexOf(q) >= 0 || String(r.amount).indexOf(q) >= 0 || fmt(parseFloat(r.amount)).replace(/,/g, '').indexOf(q.replace(/,/g, '')) >= 0;
   }
+  function clock(ts) {
+    try { return new Date(ts).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase(); } catch (e) { return ''; }
+  }
   function orderMsg(r) {
-    var t = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ' — order ₹' + fmt(parseFloat(r.amount));
-    if (paidP(r) > 0) t += ', paid ₹' + fmt(paidP(r) / 100);
-    t += balP(r) > 0 ? ', balance ₹' + fmt(balP(r) / 100) : ' — settled';
+    var t = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + '\nOrder ₹' + fmt(parseFloat(r.amount));
+    if (Array.isArray(r.parts) && r.parts.length > 1) t += ' (' + r.parts.map(function (a) { return '₹' + fmt(a); }).join(' + ') + ')';
+    var pays = r.paid || [];
+    if (pays.length) {
+      t += '\nPaid:';
+      pays.forEach(function (pm, i) { t += '\n' + (i + 1) + ') ₹' + fmt(pm.a) + (pm.t ? ' · ' + clock(pm.t) : ''); });
+      t += '\nTotal paid ₹' + fmt(paidP(r) / 100);
+    }
+    t += balP(r) > 0 ? '\nBalance ₹' + fmt(balP(r) / 100) : '\nSettled ✓';
     return t;
+  }
+  function sameNameBefore(side, row) {      // earlier line of the same person on this side (candidate to add together)
+    if (row.src === 'fixed' || !row.ok || !hasAmount(row) || !nameKey(row)) return null;
+    var hit = null;
+    for (var i = 0; i < state[side].length; i++) {
+      var o = state[side][i];
+      if (o === row) break;
+      if (!hit && o.src !== 'fixed' && o.ok && hasAmount(o) && nameKey(o) === nameKey(row)) hit = o;
+    }
+    return hit;
+  }
+  function mergeOrders(side, keep, drop) {   // add two orders of one person into one line; undo restores both
+    var list = state[side], at = list.indexOf(drop);
+    var snap = { amount: keep.amount, paid: (keep.paid || []).slice(), parts: keep.parts ? keep.parts.slice() : null, no: keep.no, dropNo: drop.no, logs: [] };
+    var parts = (keep.parts && keep.parts.length ? keep.parts : [parseFloat(keep.amount)]).concat(drop.parts && drop.parts.length ? drop.parts : [parseFloat(drop.amount)]);
+    keep.amount = String((paise(parseFloat(keep.amount)) + paise(parseFloat(drop.amount))) / 100);
+    keep.parts = parts;
+    keep.paid = (keep.paid || []).concat(drop.paid || []);
+    state.paylog.forEach(function (x) { if (x.side === side && drop.no && x.no === drop.no && x.name === (drop.name || '')) { x.no = keep.no || 0; snap.logs.push(x); } });
+    list.splice(at, 1);
+    save(); renderAll();
+    toast('#' + (keep.no || '') + ' ' + (keep.name || '') + ': now ₹' + fmt(parseFloat(keep.amount)), function () {
+      keep.amount = snap.amount; keep.paid = snap.paid; keep.parts = snap.parts;
+      snap.logs.forEach(function (x) { x.no = snap.dropNo || 0; });
+      drop.paid = drop.paid || [];
+      list.splice(Math.min(at, list.length), 0, drop);
+      save(); renderAll();
+    });
   }
   function copyText(t, m) {
     function fb() {
@@ -1015,6 +1091,7 @@
     } else {
       summary.classList.add('excess'); label.textContent = 'Excess'; figure.textContent = fmt(diffP / 100);
     }
+    $('stat-out').textContent = '₹' + fmt(o / 100); $('stat-in').textContent = '₹' + fmt(i / 100);
     $('summary-eq').textContent = 'IN ₹' + fmt(i / 100) + '  −  OUT ₹' + fmt(o / 100);
   }
 
@@ -1128,6 +1205,13 @@
       var cm = el('button', 'chip'); cm.textContent = 'Copy message';
       cm.addEventListener('click', function () { copyText(orderMsg(row), 'Message copied'); });
       pay.appendChild(cm);
+      var twin = sameNameBefore(side, row);
+      if (twin) {
+        var ad = el('button', 'chip add');
+        ad.textContent = '➕ Add to ' + (twin.no ? '#' + twin.no : 'the first line') + ' (₹' + fmt(parseFloat(twin.amount)) + ' + ₹' + fmt(parseFloat(row.amount)) + ' = ₹' + fmt((paise(parseFloat(twin.amount)) + paise(parseFloat(row.amount))) / 100) + ')';
+        ad.addEventListener('click', function () { mergeOrders(side, twin, row); });
+        pay.appendChild(ad);
+      }
       entry.appendChild(pay);
     }
 
