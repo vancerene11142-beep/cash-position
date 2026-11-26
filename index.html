@@ -356,9 +356,9 @@
       <div class="stat out"><span>To pay (OUT)</span><b id="stat-out">0</b></div>
       <div class="stat in"><span>Cash in hand (IN)</span><b id="stat-in">0</b></div>
     </div>
-    <details class="card tools" id="tools"><summary>Part payment by order number</summary>
+    <details class="card tools" id="tools"><summary>Part payment / part received by order number</summary>
     <div class="quick">
-      <h2>Part payment</h2>
+      <h2>Part payment / part received</h2>
       <div class="qseg"><button data-q="out" class="on">Pay (OUT)</button><button data-q="in">Collect (IN)</button></div>
       <div class="qrow"><input id="q-no" type="number" inputmode="numeric" min="1" step="1" placeholder="Order #"><input id="q-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount paid now"></div>
       <div class="hint" id="q-info"></div>
@@ -475,6 +475,15 @@
 </div>
 
 <div class="toast" id="toast" hidden><span id="toast-msg"></span><button id="toast-undo" hidden>Undo</button></div>
+
+<div class="dialog" id="locdlg" hidden>
+  <div class="dialog-box" role="dialog" aria-labelledby="loc-title">
+    <h3 id="loc-title"></h3>
+    <p id="loc-text"></p>
+    <div id="loc-btns"></div>
+    <div class="dialog-actions" style="margin-top:8px"><button class="btn" id="loc-cancel">Cancel</button></div>
+  </div>
+</div>
 
 <div class="dialog" id="dialog" hidden>
   <div class="dialog-box" role="alertdialog" aria-labelledby="dialog-title">
@@ -880,7 +889,7 @@
       ok: r.ok !== false, src: r.src || 'manual', reason: r.reason || '',
       alts: Array.isArray(r.alts) ? r.alts : [], raw: r.raw || '', meta: r.meta || '',
       no: r.no > 0 ? +r.no : 0, dupOk: !!r.dupOk,
-      paid: Array.isArray(r.paid) ? r.paid.filter(function (x) { return x && x.a > 0; }).map(function (x) { return { a: +x.a, t: x.t || 0, id: x.id || '' }; }) : []
+      paid: Array.isArray(r.paid) ? r.paid.filter(function (x) { return x && x.a > 0; }).map(function (x) { return { a: +x.a, t: x.t || 0, id: x.id || '', loc: x.loc === 'SHOP' || x.loc === 'OFFICE' ? x.loc : '' }; }) : []
     };
   }
 
@@ -980,9 +989,9 @@
     if (Array.isArray(r.parts) && r.parts.length > 1) t += ' (' + r.parts.map(function (a) { return '₹' + fmt(a); }).join(' + ') + ')';
     var pays = r.paid || [];
     if (pays.length) {
-      t += '\nPaid:';
+      t += '\n' + W(sideOf(r)).hdr;
       pays.forEach(function (pm, i) { t += '\n' + (i + 1) + ') ₹' + fmt(pm.a) + (pm.t ? ' · ' + clock(pm.t) : ''); });
-      t += '\nTotal paid ₹' + fmt(paidP(r) / 100);
+      t += '\n' + W(sideOf(r)).total + ' ₹' + fmt(paidP(r) / 100);
     }
     t += balP(r) > 0 ? '\nBalance ₹' + fmt(balP(r) / 100) : '\nSettled ✓';
     return t;
@@ -1047,7 +1056,7 @@
     function carry(side) {
       return state[side].filter(function (r) { return r.src !== 'fixed' && hasAmount(r) && balP(r) > 0; }).map(function (r) {
         return fix({ id: nid(), name: r.name, amount: String(balP(r) / 100), ok: true, src: 'carry',
-          meta: 'Carried from ' + dayLabel(todayKey()) + (paidP(r) > 0 ? ' · order ₹' + fmt(parseFloat(r.amount)) + ', paid ₹' + fmt(paidP(r) / 100) : ''), raw: '' });
+          meta: 'Carried from ' + dayLabel(todayKey()) + (paidP(r) > 0 ? ' · order ₹' + fmt(parseFloat(r.amount)) + ', ' + W(side).paidL + ' ₹' + fmt(paidP(r) / 100) : ''), raw: '' });
       });
     }
     var co = carry('out'), ci = carry('in');
@@ -1061,18 +1070,63 @@
   function findNo(side, no) {
     return state[side].filter(function (r) { return r.src !== 'fixed' && r.no === no; })[0] || null;
   }
-  function recordPay(side, row, amt) {
+  function sideOf(r) { return state.in.indexOf(r) >= 0 ? 'in' : 'out'; }
+  function W(side) {
+    return side === 'in'
+      ? { paid: 'Received', paidL: 'received', full: 'Received in full', part: 'Part received', another: 'Another part received', ph: 'Amount received now', hdr: 'Received:', total: 'Total received', partTxt: 'part received', enter: 'Enter the amount received' }
+      : { paid: 'Paid', paidL: 'paid', full: 'Paid in full', part: 'Part payment', another: 'Another part payment', ph: 'Amount paid now', hdr: 'Paid:', total: 'Total paid', partTxt: 'part paid', enter: 'Enter the amount paid' };
+  }
+  function cashRow(loc) { return state.in.filter(function (r) { return r.src === 'fixed' && r.name === loc; })[0] || null; }
+  function cashNow(loc) { var r = cashRow(loc); var n = r ? parseFloat(r.amount) : 0; return isNaN(n) ? 0 : paise(n); }
+  function adjCash(loc, deltaP) {
+    var r = cashRow(loc); if (!r) return;
+    r.amount = String((cashNow(loc) + deltaP) / 100);
+  }
+  function locDelta(side, a) { return (side === 'in' ? 1 : -1) * paise(a); }
+  var locFn = null;
+  function askLoc(side, row, a, fn) {
+    var w = W(side);
+    $('loc-title').textContent = (side === 'in' ? 'Received ₹' : 'Paid ₹') + fmt(a) + (row.name ? ' · ' + row.name : '');
+    $('loc-text').textContent = side === 'in' ? 'Where did the cash go?' : 'Where did the cash come from?';
+    var box = $('loc-btns'); box.innerHTML = '';
+    ['SHOP', 'OFFICE'].forEach(function (loc) {
+      var from = cashNow(loc), to = from + locDelta(side, a);
+      var b = el('button', 'btn primary'); b.style.display = 'block'; b.style.width = '100%'; b.style.marginBottom = '8px';
+      b.textContent = (loc === 'SHOP' ? 'Shop' : 'Office') + '   ₹' + fmt(from / 100) + ' → ₹' + fmt(to / 100);
+      if (to < 0) { b.style.background = 'var(--short)'; b.style.borderColor = 'var(--short)'; b.textContent += '  ⚠ below zero'; }
+      b.addEventListener('click', function () { var f = locFn; closeLoc(); if (f) f(loc); });
+      box.appendChild(b);
+    });
+    var nb = el('button', 'btn'); nb.style.display = 'block'; nb.style.width = '100%';
+    nb.textContent = 'Neither (bank / GPay / not cash)';
+    nb.addEventListener('click', function () { var f = locFn; closeLoc(); if (f) f(''); });
+    box.appendChild(nb);
+    locFn = fn; $('locdlg').hidden = false;
+  }
+  function closeLoc() { $('locdlg').hidden = true; locFn = null; }
+  function payAsk(side, row, amt, onDone) {      // checks the amount, asks Shop / Office, then records
+    var a = money(amt), w = W(side);
+    if (!(a > 0)) { toast(w.enter); return; }
+    if (paise(a) > balP(row)) { toast('That is more than the balance ₹' + fmt(balP(row) / 100)); return; }
+    askLoc(side, row, a, function (loc) { if (recordPay(side, row, a, loc) && onDone) onDone(); });
+  }
+  function undoPay(side, row, rec) {
+    row.paid = row.paid.filter(function (x) { return x !== rec; }); dropLog(rec.id);
+    if (rec.loc) adjCash(rec.loc, -locDelta(side, rec.a));
+  }
+  function recordPay(side, row, amt, loc) {
     var a = money(amt);
-    if (!(a > 0)) { toast('Enter the amount paid'); return false; }
+    if (!(a > 0)) { toast(W(side).enter); return false; }
     if (paise(a) > balP(row)) { toast('That is more than the balance ₹' + fmt(balP(row) / 100)); return false; }
-    var rec = { a: a, t: Date.now(), id: nid() };
+    var rec = { a: a, t: Date.now(), id: nid(), loc: loc || '' };
     if (!Array.isArray(row.paid)) row.paid = [];
     row.paid.push(rec);
+    if (rec.loc) adjCash(rec.loc, locDelta(side, a));
     state.paylog.push({ id: rec.id, side: side, no: row.no || 0, name: row.name || '', a: a, t: rec.t, done: false, how: '' });
     save(); renderAll();
     var left = balP(row) / 100;
-    toast('#' + row.no + ' ' + (row.name || '') + ': ₹' + fmt(a) + (left > 0 ? ' · balance ₹' + fmt(left) : ' · settled'), function () {
-      row.paid = row.paid.filter(function (x) { return x !== rec; }); dropLog(rec.id); save(); renderAll();
+    toast('#' + row.no + ' ' + (row.name || '') + ': ₹' + fmt(a) + (rec.loc ? ' · ' + (rec.loc === 'SHOP' ? 'Shop' : 'Office') + ' ₹' + fmt(cashNow(rec.loc) / 100) : '') + (left > 0 ? ' · balance ₹' + fmt(left) : ' · settled'), function () {
+      undoPay(side, row, rec); save(); renderAll();
     });
     return true;
   }
@@ -1169,14 +1223,14 @@
       var side = key, pay = el('div', 'pay'), left = balP(row);
       if (row.paid.length) {
         var sm = el('div', 'paysum');
-        sm.textContent = settled ? 'Settled ✓  (paid ₹' + fmt(paidP(row) / 100) + ')' : 'Paid ₹' + fmt(paidP(row) / 100) + '  ·  Balance ₹' + fmt(left / 100);
+        sm.textContent = settled ? 'Settled ✓  (' + W(side).paidL + ' ₹' + fmt(paidP(row) / 100) + ')' : W(side).paid + ' ₹' + fmt(paidP(row) / 100) + '  ·  Balance ₹' + fmt(left / 100);
         pay.appendChild(sm);
         row.paid.forEach(function (pm) {
           var h = el('button', 'chip hist');
-          h.textContent = '− ₹' + fmt(pm.a) + ' ✕';
+          h.textContent = (side === 'in' ? '+ ₹' : '− ₹') + fmt(pm.a) + (pm.loc ? ' ' + (pm.loc === 'SHOP' ? 'Shop' : 'Office') : '') + ' ✕';
           h.addEventListener('click', function () {
-            ask('Remove this payment?', '₹' + fmt(pm.a) + ' on ' + (row.name || 'this order'), 'Remove', function () {
-              row.paid = row.paid.filter(function (x) { return x !== pm; }); dropLog(pm.id); save(); renderAll();
+            ask('Remove this ' + (side === 'in' ? 'receipt' : 'payment') + '?', '₹' + fmt(pm.a) + ' on ' + (row.name || 'this order') + (pm.loc ? ' · ' + (pm.loc === 'SHOP' ? 'Shop' : 'Office') + ' amount will be changed back' : ''), 'Remove', function () {
+              undoPay(side, row, pm); save(); renderAll();
             });
           });
           pay.appendChild(h);
@@ -1184,20 +1238,20 @@
       }
       if (left > 0) {
         var pf = el('button', 'chip go');
-        pf.textContent = 'Paid in full';
-        pf.addEventListener('click', function () { recordPay(side, row, left / 100); });
+        pf.textContent = W(side).full;
+        pf.addEventListener('click', function () { payAsk(side, row, left / 100); });
         pay.appendChild(pf);
         var ob = el('button', 'chip');
-        ob.textContent = openPay === row.id ? 'Close' : (row.paid.length ? 'Another part payment' : 'Part payment');
+        ob.textContent = openPay === row.id ? 'Close' : (row.paid.length ? W(side).another : W(side).part);
         ob.addEventListener('click', function () { openPay = openPay === row.id ? null : row.id; renderAll(); });
         pay.appendChild(ob);
         if (openPay === row.id) {
           var f = el('div', 'payform');
-          var pi = el('input'); pi.type = 'number'; pi.inputMode = 'decimal'; pi.step = '0.01'; pi.placeholder = 'Amount paid now';
+          var pi = el('input'); pi.type = 'number'; pi.inputMode = 'decimal'; pi.step = '0.01'; pi.placeholder = W(side).ph;
           var full = el('button', 'chip'); full.textContent = 'Full balance ₹' + fmt(left / 100);
           full.addEventListener('click', function () { pi.value = String(left / 100); });
           var go = el('button', 'chip go'); go.textContent = 'Record';
-          go.addEventListener('click', function () { if (recordPay(side, row, parseFloat(pi.value))) openPay = null, renderAll(); });
+          go.addEventListener('click', function () { payAsk(side, row, parseFloat(pi.value), function () { openPay = null; renderAll(); }); });
           f.appendChild(pi); f.appendChild(full); f.appendChild(go);
           pay.appendChild(f);
         }
@@ -1312,11 +1366,12 @@
   /* ---------- quick part payment by order number ---------- */
   function renderQuick() {
     Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) { b.classList.toggle('on', b.getAttribute('data-q') === qSide); });
+    $('q-amt').placeholder = W(qSide).ph;
     var no = parseInt($('q-no').value, 10), info = $('q-info'), r = isNaN(no) ? null : findNo(qSide, no);
     if (isNaN(no)) { info.textContent = 'Type the order number shown next to the name (#1, #2 …).'; info.className = 'hint'; return; }
     if (!r) { info.textContent = 'No order #' + no + ' on the ' + (qSide === 'out' ? 'Pay (OUT)' : 'Collect (IN)') + ' side.'; info.className = 'hint bad'; return; }
     info.className = 'hint';
-    info.textContent = '#' + r.no + ' ' + (r.name || '—') + ' · order ₹' + fmt(parseFloat(r.amount)) + ((r.paid || []).length ? ' · paid ₹' + fmt(paidP(r) / 100) : '') + ' · balance ₹' + fmt(balP(r) / 100);
+    info.textContent = '#' + r.no + ' ' + (r.name || '—') + ' · order ₹' + fmt(parseFloat(r.amount)) + ((r.paid || []).length ? ' · ' + W(qSide).paidL + ' ₹' + fmt(paidP(r) / 100) : '') + ' · balance ₹' + fmt(balP(r) / 100);
   }
   Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) {
     b.addEventListener('click', function () { qSide = b.getAttribute('data-q'); renderQuick(); });
@@ -1330,7 +1385,7 @@
   $('q-go').addEventListener('click', function () {
     var no = parseInt($('q-no').value, 10), r = isNaN(no) ? null : findNo(qSide, no);
     if (!r) { toast('Type a valid order number first'); return; }
-    if (recordPay(qSide, r, parseFloat($('q-amt').value))) { $('q-amt').value = ''; $('q-no').value = ''; renderQuick(); }
+    payAsk(qSide, r, parseFloat($('q-amt').value), function () { $('q-amt').value = ''; $('q-no').value = ''; renderQuick(); });
   });
 
   /* ---------- search / filter ---------- */
@@ -1454,7 +1509,7 @@
         if (!g[1].length) { var n = el('div', 'hint'); n.textContent = 'No lines'; d.appendChild(n); }
         g[1].forEach(function (r) {
           var ln = el('div', 'hline');
-          var l1 = el('span'); l1.textContent = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + (r.paid > 0 ? ' (paid ₹' + fmt(r.paid) + ' of ' + fmt(r.amt) + ')' : '');
+          var l1 = el('span'); l1.textContent = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + (r.paid > 0 ? ' (' + (g[0] === 'IN' ? 'received' : 'paid') + ' ₹' + fmt(r.paid) + ' of ' + fmt(r.amt) + ')' : '');
           var l2 = el('span', 'n'); l2.textContent = fmt(r.bal);
           ln.appendChild(l1); ln.appendChild(l2); d.appendChild(ln);
         });
@@ -1480,7 +1535,7 @@
     [['OUT', 'out'], ['IN', 'in']].forEach(function (g) {
       L.push(g[0]);
       state[g[1]].filter(function (r) { return hasAmount(r) && balP(r) > 0; }).forEach(function (r) {
-        L.push((r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ': ' + fmt(balP(r) / 100) + (paidP(r) > 0 ? ' (part paid, order ' + fmt(parseFloat(r.amount)) + ')' : ''));
+        L.push((r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ': ' + fmt(balP(r) / 100) + (paidP(r) > 0 ? ' (' + W(g[1]).partTxt + ', order ' + fmt(parseFloat(r.amount)) + ')' : ''));
       });
       L.push('Total ' + g[0] + ': ' + fmt(sideTotalPaise(g[1]) / 100), '');
     });
@@ -1522,6 +1577,8 @@
     $('dialog').hidden = false;
   }
   function closeDialog() { $('dialog').hidden = true; dialogFn = null; }
+  $('loc-cancel').addEventListener('click', closeLoc);
+  $('locdlg').addEventListener('click', function (e) { if (e.target === $('locdlg')) closeLoc(); });
   $('dialog-ok').addEventListener('click', function () { var f = dialogFn; closeDialog(); if (f) f(); });
   $('dialog-cancel').addEventListener('click', closeDialog);
   $('dialog').addEventListener('click', function (e) { if (e.target === $('dialog')) closeDialog(); });
@@ -1676,7 +1733,7 @@
         x.font = '600 32px ' + SERIF;
         var aw = x.measureText(amtTxt).width;
         x.font = '30px ' + SANS;
-        x.fillText(trimText(x, (r.no ? '#' + r.no + '  ' : '') + (r.name || '—') + (r.paid && r.paid.length ? '  (part paid)' : ''), W - 2 * pad - aw - 50), pad + 8, y + 44);
+        x.fillText(trimText(x, (r.no ? '#' + r.no + '  ' : '') + (r.name || '—') + (r.paid && r.paid.length ? (title === 'IN' ? '  (part received)' : '  (part paid)') : ''), W - 2 * pad - aw - 50), pad + 8, y + 44);
         x.font = '600 32px ' + SERIF; x.textAlign = 'right';
         x.fillText(amtTxt, W - pad - 8, y + 44);
         y += rowH;
