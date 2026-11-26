@@ -460,6 +460,7 @@
       </div>
     </div>
     <div class="notice" id="notice-in" hidden></div>
+    <div class="card" id="rcpt-card" hidden></div>
     <div class="stage card" id="stage-in" hidden>
       <div class="stage-head"><h3>To review</h3><span class="hint" id="stage-count-in"></span></div>
       <div class="rows" id="rows-sin"></div>
@@ -843,7 +844,7 @@
   var STORE_KEY = 'cashCheck.v2';
   var OLD_KEY = 'cashCheck.v1';
   var DEFAULT_BOX = 1000;
-  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [], paylog: [] };
+  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [], paylog: [], rcpt: [] };
   var hiddenCount = { in: 0, out: 0 }, openPay = null, qSide = 'out', fText = '', fMode = 'all';
   var notices = { in: null, out: null };
   var lastRemoved = null;
@@ -917,6 +918,7 @@
           if (!p.boxMig && state.box === 100000) state.box = DEFAULT_BOX;   // old default, 1 box is now 1,000
           if (Array.isArray(p.history)) state.history = p.history;
           if (Array.isArray(p.paylog)) state.paylog = p.paylog.filter(function (x) { return x && x.a > 0; });
+          if (Array.isArray(p.rcpt)) state.rcpt = p.rcpt.slice(-300);
           if (p.seq && p.seq.in >= 0 && p.seq.out >= 0) state.seq = { in: +p.seq.in, out: +p.seq.out };
           loaded = true;
         }
@@ -1604,6 +1606,92 @@
   }
 
   /* ---------- paste -> review list -> Position ---------- */
+  /* ---------- coded "Received" lines from the group, e.g.  FD 146.37.230 Received  (= 146,372.30) ---------- */
+  var rcptItems = [];
+  function decodeAmt(code) {            // dots are only separators, "b" = 00, last two digits are paise
+    if (!/[.b]/i.test(code)) return null;
+    var d = code.replace(/\./g, '').replace(/b/i, '00');
+    if (!/^\d+$/.test(d)) return null;
+    var v = parseInt(d, 10) / 100;
+    return v > 0 ? v : null;
+  }
+  function extractReceipts(text) {      // returns { items, rest }
+    var items = [], keep = [];
+    String(text).replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').replace(/[\u00a0\u202f]/g, ' ').split(/\r?\n/).forEach(function (line) {
+      var body = line.replace(HDR, '').replace(HDR2, '').trim();
+      var m = body.match(/^(.*?)[\s\-:]+(\d[\d.]*b?)\s+(?:received|recd|rcvd)\b/i), a = m ? decodeAmt(m[2]) : null;
+      if (m && a && m[1].trim()) items.push({ line: line.trim(), key: normKey(line.trim()), name: m[1].trim(), a: a });
+      else keep.push(line);
+    });
+    return { items: items, rest: keep.join('\n') };
+  }
+  function openIn() { return state.in.filter(function (r) { return r.src !== 'fixed' && hasAmount(r) && balP(r) > 0; }); }
+  function matchOrders(it) {
+    var nk = it.name.replace(/\s+/g, ' ').trim().toLowerCase(), open = openIn();
+    var c = open.filter(function (r) { return nameKey(r) === nk; });
+    if (!c.length && nk.length >= 2) c = open.filter(function (r) { var k = nameKey(r); return k.indexOf(nk) >= 0 || (k.length >= 2 && nk.indexOf(k) >= 0); });
+    var exact = c.filter(function (r) { return balP(r) === paise(it.a); });
+    it.cands = c;
+    it.pick = c.length === 1 ? c[0] : exact.length === 1 ? exact[0] : null;
+  }
+  function renderRcpt() {
+    var box = $('rcpt-card');
+    if (!rcptItems.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false; box.innerHTML = '';
+    var h = el('h3'); h.textContent = 'Received at the office'; box.appendChild(h);
+    var hint = el('div', 'hint'); hint.textContent = 'Check each amount. When you tap the button, every ticked line is marked received on its order and added to the Office amount.'; box.appendChild(hint);
+    var total = 0;
+    rcptItems.forEach(function (it) {
+      var row = el('div', 'entry'); row.style.marginTop = '10px';
+      var top = el('label'); top.style.display = 'flex'; top.style.gap = '8px'; top.style.alignItems = 'center';
+      var cb = el('input'); cb.type = 'checkbox'; cb.checked = !!it.on;
+      cb.addEventListener('change', function () { it.on = cb.checked; renderRcpt(); });
+      var t = el('b'); t.textContent = it.name + ' · ₹' + fmt(it.a);
+      top.appendChild(cb); top.appendChild(t); row.appendChild(top);
+      var info = el('div', 'hint');
+      var bad = '';
+      if (it.dup) bad = 'Same line was already added earlier. Tick only if it is a new receipt.';
+      else if (!it.cands.length) bad = 'No open collect order for "' + it.name + '". Add the order first, or leave this one.';
+      else if (!it.pick) bad = 'More than one open order. Choose one:';
+      else if (paise(it.a) > balP(it.pick)) bad = 'More than the balance ₹' + fmt(balP(it.pick) / 100) + ' of #' + it.pick.no + '. Check the amount.';
+      if (it.pick) info.textContent = '→ #' + it.pick.no + ' ' + (it.pick.name || '') + ' · balance ₹' + fmt(balP(it.pick) / 100) + ' → ₹' + fmt((balP(it.pick) - paise(it.a)) / 100);
+      row.appendChild(info);
+      if (bad) { var w = el('div', 'dupwarn'); w.textContent = '⚠ ' + bad; row.appendChild(w); }
+      if (!it.pick && it.cands.length > 1) {
+        var cs = el('div', 'chips');
+        it.cands.forEach(function (r) {
+          var b = el('button', 'chip'); b.textContent = '#' + r.no + ' ' + (r.name || '') + ' · ₹' + fmt(balP(r) / 100);
+          b.addEventListener('click', function () { it.pick = r; renderRcpt(); });
+          cs.appendChild(b);
+        });
+        row.appendChild(cs);
+      }
+      it.ready = !!(it.pick && paise(it.a) <= balP(it.pick));
+      if (it.on && it.ready) total += paise(it.a);
+      box.appendChild(row);
+    });
+    var acts = el('div', 'paste-actions');
+    var go = el('button', 'btn primary grow'); go.textContent = 'Mark received · add ₹' + fmt(total / 100) + ' to Office';
+    go.addEventListener('click', applyRcpt);
+    var no = el('button', 'btn ghost'); no.textContent = 'Cancel';
+    no.addEventListener('click', function () { rcptItems = []; renderRcpt(); });
+    acts.appendChild(go); acts.appendChild(no); box.appendChild(acts);
+  }
+  function applyRcpt() {
+    var done = 0, sum = 0, left = [];
+    rcptItems.forEach(function (it) {
+      if (it.on && it.ready && it.pick && balP(it.pick) >= paise(it.a)) {
+        if (recordPay('in', it.pick, it.a, 'OFFICE')) { done++; sum += paise(it.a); state.rcpt.push(it.key); return; }
+      }
+      left.push(it);
+    });
+    state.rcpt = state.rcpt.slice(-300);
+    rcptItems = left;
+    save(); renderAll(); renderRcpt();
+    if (done) toast(done + ' received · Office +₹' + fmt(sum / 100) + ' → ₹' + fmt(cashNow('OFFICE') / 100));
+    else toast('Nothing was added: tick a line with a matching order');
+  }
+
   function runPaste(tab) {
     var ta = $('paste-' + tab);
     if (!ta.value.trim()) { toast('Paste some messages first'); return; }
@@ -1611,8 +1699,18 @@
     [state.in, state.out, state.stage.in, state.stage.out].forEach(function (l) {
       l.forEach(function (r) { if (r.raw) existing.push(normKey(r.raw)); });
     });
-    var res = parseText(ta.value, tab, state.box, existing);
-    if (!res.rows.length && !res.skipped.length) { toast('Nothing found in that text'); return; }
+    var src = ta.value, gotR = 0;
+    if (tab === 'in') {
+      var ex = extractReceipts(src);
+      if (ex.items.length) {
+        ex.items.forEach(function (it) { it.dup = state.rcpt.indexOf(it.key) >= 0; it.on = !it.dup; matchOrders(it); });
+        rcptItems = rcptItems.concat(ex.items); gotR = ex.items.length; src = ex.rest;
+        renderRcpt();
+        if (!src.trim()) { ta.value = ''; var rc = $('rcpt-card'); setTimeout(function () { rc.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 50); return; }
+      }
+    }
+    var res = parseText(src, tab, state.box, existing);
+    if (!res.rows.length && !res.skipped.length) { if (!gotR) toast('Nothing found in that text'); ta.value = ''; return; }
     res.rows.forEach(function (r) { r.id = nid(); state.stage[tab].push(r); });
     ta.value = '';
     var bad = res.rows.filter(function (r) { return !r.ok; }).length;
