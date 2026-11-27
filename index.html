@@ -446,12 +446,6 @@
     </div>
     <div class="notice" id="notice-in" hidden></div>
     <div class="card" id="rcpt-card" hidden></div>
-    <div class="card" id="adv-form">
-      <h3>Received without an order</h3>
-      <p class="hint">Money that came in before its collect message. It goes into the Shop or Office amount now, and onto the order when that order is added.</p>
-      <div class="qrow" style="grid-template-columns:1fr 1fr"><input id="adv-name" type="text" placeholder="Name" autocomplete="off"><input id="adv-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount received"></div>
-      <div class="actions"><button class="btn primary grow" id="adv-office">Add to Office</button><button class="btn grow" id="adv-shop">Add to Shop</button></div>
-    </div>
     <div class="stage card" id="stage-in" hidden>
       <div class="stage-head"><h3>To review</h3><span class="hint" id="stage-count-in"></span></div>
       <div class="rows" id="rows-sin"></div>
@@ -1540,11 +1534,7 @@
   }
   function closeDialog() { $('dialog').hidden = true; dialogFn = null; }
   $('loc-cancel').addEventListener('click', closeLoc);
-  ['office', 'shop'].forEach(function (k) {
-    $('adv-' + k).addEventListener('click', function () {
-      if (addAdvance($('adv-name').value, parseFloat($('adv-amt').value), k.toUpperCase())) { $('adv-name').value = ''; $('adv-amt').value = ''; }
-    });
-  });
+
   $('locdlg').addEventListener('click', function (e) { if (e.target === $('locdlg')) closeLoc(); });
   $('dialog-ok').addEventListener('click', function () { var f = dialogFn; closeDialog(); if (f) f(); });
   $('dialog-cancel').addEventListener('click', closeDialog);
@@ -1679,8 +1669,8 @@
     if (!rcptItems.length) { box.hidden = true; box.innerHTML = ''; return; }
     box.hidden = false; box.innerHTML = '';
     var h = el('h3'); h.textContent = 'Received at the office'; box.appendChild(h);
-    var hint = el('div', 'hint'); hint.textContent = 'Check each amount. When you tap the button, every ticked line is marked received on its order and added to the Office amount.'; box.appendChild(hint);
-    var total = 0;
+    var hint = el('div', 'hint'); hint.textContent = 'Check each amount and choose Office or Shop. Every ticked line is added to that cash amount, and marked received on its order (or kept until its order is added).'; box.appendChild(hint);
+    var tot = { OFFICE: 0, SHOP: 0 };
     rcptItems.forEach(function (it) {
       var row = el('div', 'entry'); row.style.marginTop = '10px';
       var top = el('label'); top.style.display = 'flex'; top.style.gap = '8px'; top.style.alignItems = 'center';
@@ -1710,30 +1700,37 @@
         row.appendChild(cs);
       }
       it.ready = !!(it.adv || (it.pick && paise(it.a) <= balP(it.pick)));
-      if (it.on && it.ready) total += paise(it.a);
+      if (it.on && it.ready) tot[it.loc] += paise(it.a);
+      var lc = el('div', 'chips'); lc.style.marginTop = '6px';
+      [['OFFICE', 'Office'], ['SHOP', 'Shop']].forEach(function (p) {
+        var lb = el('button', 'chip' + (it.loc === p[0] ? ' on' : '')); lb.textContent = 'Add to ' + p[1];
+        lb.addEventListener('click', function () { it.loc = p[0]; renderRcpt(); });
+        lc.appendChild(lb);
+      });
+      row.appendChild(lc);
       box.appendChild(row);
     });
     var acts = el('div', 'paste-actions');
-    var go = el('button', 'btn primary grow'); go.textContent = 'Mark received · add ₹' + fmt(total / 100) + ' to Office';
+    var go = el('button', 'btn primary grow'); go.textContent = 'Add' + (tot.OFFICE ? ' ₹' + fmt(tot.OFFICE / 100) + ' to Office' : '') + (tot.OFFICE && tot.SHOP ? ' ·' : '') + (tot.SHOP ? ' ₹' + fmt(tot.SHOP / 100) + ' to Shop' : '') + (!tot.OFFICE && !tot.SHOP ? ' received' : '');
     go.addEventListener('click', applyRcpt);
     var no = el('button', 'btn ghost'); no.textContent = 'Cancel';
     no.addEventListener('click', function () { rcptItems = []; renderRcpt(); });
     acts.appendChild(go); acts.appendChild(no); box.appendChild(acts);
   }
   function applyRcpt() {
-    var done = 0, sum = 0, left = [];
+    var done = 0, sum = 0, left = [], where = {};
     rcptItems.forEach(function (it) {
       if (it.on && it.ready && it.adv) {
-        if (addAdvance(it.name, it.a, 'OFFICE')) { done++; sum += paise(it.a); state.rcpt.push(it.key); return; }
+        if (addAdvance(it.name, it.a, it.loc)) { done++; sum += paise(it.a); where[it.loc] = 1; state.rcpt.push(it.key); return; }
       } else if (it.on && it.ready && it.pick && balP(it.pick) >= paise(it.a)) {
-        if (recordPay('in', it.pick, it.a, 'OFFICE')) { done++; sum += paise(it.a); state.rcpt.push(it.key); return; }
+        if (recordPay('in', it.pick, it.a, it.loc)) { done++; sum += paise(it.a); where[it.loc] = 1; state.rcpt.push(it.key); return; }
       }
       left.push(it);
     });
     state.rcpt = state.rcpt.slice(-300);
     rcptItems = left;
     save(); renderAll(); renderRcpt();
-    if (done) toast(done + ' received · Office +₹' + fmt(sum / 100) + ' → ₹' + fmt(cashNow('OFFICE') / 100));
+    if (done) toast(done + ' received · ₹' + fmt(sum / 100) + ' added to ' + (where.OFFICE && where.SHOP ? 'Office and Shop' : where.SHOP ? 'Shop' : 'Office'));
     else toast('Nothing was added: tick a line with a matching order');
   }
 
@@ -1748,7 +1745,7 @@
     if (tab === 'in') {
       var ex = extractReceipts(src);
       if (ex.items.length) {
-        ex.items.forEach(function (it) { it.dup = state.rcpt.indexOf(it.key) >= 0; it.on = !it.dup; matchOrders(it); });
+        ex.items.forEach(function (it) { it.dup = state.rcpt.indexOf(it.key) >= 0; it.on = !it.dup; it.loc = 'OFFICE'; matchOrders(it); });
         rcptItems = rcptItems.concat(ex.items); gotR = ex.items.length; src = ex.rest;
         renderRcpt();
         if (!src.trim()) { ta.value = ''; var rc = $('rcpt-card'); setTimeout(function () { rc.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 50); return; }
