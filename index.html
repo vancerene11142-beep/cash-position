@@ -352,23 +352,8 @@
       <div class="eq" id="summary-eq"></div>
     </div>
 
-    <div class="split">
-      <div class="stat out"><span>To pay (OUT)</span><b id="stat-out">0</b></div>
-      <div class="stat in"><span>Cash in hand (IN)</span><b id="stat-in">0</b></div>
-    </div>
-    <details class="card tools" id="tools"><summary>Part payment / part received by order number</summary>
-    <div class="quick">
-      <h2>Part payment / part received</h2>
-      <div class="qseg"><button data-q="out" class="on">Pay (OUT)</button><button data-q="in">Collect (IN)</button></div>
-      <div class="qrow"><input id="q-no" type="number" inputmode="numeric" min="1" step="1" placeholder="Order #"><input id="q-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount paid now"></div>
-      <div class="hint" id="q-info"></div>
-      <div class="actions"><button class="btn primary grow" id="q-go">Record</button><button class="btn" id="q-full">Full balance</button></div>
-    </div></details>
-    <div class="card findbar">
-      <input id="f-text" type="search" placeholder="Search name, # or amount" autocomplete="off">
-      <div class="qseg3"><button data-f="all" class="on">All</button><button data-f="open">Open</button><button data-f="settled">Settled</button></div>
-      <div class="hint" id="f-info"></div>
-    </div>
+    <div class="card findbar"><div class="qseg3"><button data-f="all" class="on">All</button><button data-f="open">Open</button><button data-f="settled">Settled</button></div></div>
+    <div class="card" id="adv-pos" hidden></div>
 
     <div class="board card">
       <div class="side side-out">
@@ -461,6 +446,12 @@
     </div>
     <div class="notice" id="notice-in" hidden></div>
     <div class="card" id="rcpt-card" hidden></div>
+    <div class="card" id="adv-form">
+      <h3>Received without an order</h3>
+      <p class="hint">Money that came in before its collect message. It goes into the Shop or Office amount now, and onto the order when that order is added.</p>
+      <div class="qrow" style="grid-template-columns:1fr 1fr"><input id="adv-name" type="text" placeholder="Name" autocomplete="off"><input id="adv-amt" type="number" inputmode="decimal" step="0.01" placeholder="Amount received"></div>
+      <div class="actions"><button class="btn primary grow" id="adv-office">Add to Office</button><button class="btn grow" id="adv-shop">Add to Shop</button></div>
+    </div>
     <div class="stage card" id="stage-in" hidden>
       <div class="stage-head"><h3>To review</h3><span class="hint" id="stage-count-in"></span></div>
       <div class="rows" id="rows-sin"></div>
@@ -844,8 +835,8 @@
   var STORE_KEY = 'cashCheck.v2';
   var OLD_KEY = 'cashCheck.v1';
   var DEFAULT_BOX = 1000;
-  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [], paylog: [], rcpt: [] };
-  var hiddenCount = { in: 0, out: 0 }, openPay = null, qSide = 'out', fText = '', fMode = 'all';
+  var state = { in: [], out: [], stage: { in: [], out: [] }, box: DEFAULT_BOX, seq: { in: 0, out: 0 }, boxMig: 1, history: [], paylog: [], rcpt: [], adv: [] };
+  var hiddenCount = { in: 0, out: 0 }, openPay = null, fText = '', fMode = 'all';
   var notices = { in: null, out: null };
   var lastRemoved = null;
   var toastTimer = null;
@@ -919,6 +910,7 @@
           if (Array.isArray(p.history)) state.history = p.history;
           if (Array.isArray(p.paylog)) state.paylog = p.paylog.filter(function (x) { return x && x.a > 0; });
           if (Array.isArray(p.rcpt)) state.rcpt = p.rcpt.slice(-300);
+          if (Array.isArray(p.adv)) state.adv = p.adv.filter(function (x) { return x && x.a > 0; });
           if (p.seq && p.seq.in >= 0 && p.seq.out >= 0) state.seq = { in: +p.seq.in, out: +p.seq.out };
           loaded = true;
         }
@@ -987,14 +979,11 @@
     try { return new Date(ts).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase(); } catch (e) { return ''; }
   }
   function orderMsg(r) {
-    var t = (r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + '\nOrder ₹' + fmt(parseFloat(r.amount));
-    if (Array.isArray(r.parts) && r.parts.length > 1) t += ' (' + r.parts.map(function (a) { return '₹' + fmt(a); }).join(' + ') + ')';
-    var pays = r.paid || [];
-    if (pays.length) {
-      t += '\n' + W(sideOf(r)).hdr;
-      pays.forEach(function (pm, i) { t += '\n' + (i + 1) + ') ₹' + fmt(pm.a) + (pm.t ? ' · ' + clock(pm.t) : ''); });
-      t += '\n' + W(sideOf(r)).total + ' ₹' + fmt(paidP(r) / 100);
-    }
+    var side = sideOf(r), w = W(side), pays = r.paid || [], name = r.name || '—';
+    if (!pays.length) return name + ' – ₹' + fmt(parseFloat(r.amount));
+    var t = name + '\nOrder ₹' + fmt(parseFloat(r.amount));
+    if (Array.isArray(r.parts) && r.parts.length > 1) t += ' (' + r.parts.map(function (a) { return fmt(a); }).join(' + ') + ')';
+    t += '\n' + w.paid + ' ' + pays.map(function (pm) { return '₹' + fmt(pm.a) + (pm.t ? ' (' + clock(pm.t) + ')' : ''); }).join(' + ');
     t += balP(r) > 0 ? '\nBalance ₹' + fmt(balP(r) / 100) : '\nSettled ✓';
     return t;
   }
@@ -1147,7 +1136,6 @@
     } else {
       summary.classList.add('excess'); label.textContent = 'Excess'; figure.textContent = fmt(diffP / 100);
     }
-    $('stat-out').textContent = '₹' + fmt(o / 100); $('stat-in').textContent = '₹' + fmt(i / 100);
     $('summary-eq').textContent = 'IN ₹' + fmt(i / 100) + '  −  OUT ₹' + fmt(o / 100);
   }
 
@@ -1362,41 +1350,13 @@
     renderTotals();
     renderStageMeta('out'); renderStageMeta('in');
     renderNotice('out'); renderNotice('in');
-    renderQuick(); renderFindInfo(); renderHistory(); renderCheck();
+    renderFindInfo(); renderAdv(); renderHistory(); renderCheck();
   }
-
-  /* ---------- quick part payment by order number ---------- */
-  function renderQuick() {
-    Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) { b.classList.toggle('on', b.getAttribute('data-q') === qSide); });
-    $('q-amt').placeholder = W(qSide).ph;
-    var no = parseInt($('q-no').value, 10), info = $('q-info'), r = isNaN(no) ? null : findNo(qSide, no);
-    if (isNaN(no)) { info.textContent = 'Type the order number shown next to the name (#1, #2 …).'; info.className = 'hint'; return; }
-    if (!r) { info.textContent = 'No order #' + no + ' on the ' + (qSide === 'out' ? 'Pay (OUT)' : 'Collect (IN)') + ' side.'; info.className = 'hint bad'; return; }
-    info.className = 'hint';
-    info.textContent = '#' + r.no + ' ' + (r.name || '—') + ' · order ₹' + fmt(parseFloat(r.amount)) + ((r.paid || []).length ? ' · ' + W(qSide).paidL + ' ₹' + fmt(paidP(r) / 100) : '') + ' · balance ₹' + fmt(balP(r) / 100);
-  }
-  Array.prototype.forEach.call(document.querySelectorAll('[data-q]'), function (b) {
-    b.addEventListener('click', function () { qSide = b.getAttribute('data-q'); renderQuick(); });
-  });
-  $('q-no').addEventListener('input', renderQuick);
-  $('q-full').addEventListener('click', function () {
-    var r = findNo(qSide, parseInt($('q-no').value, 10));
-    if (!r) { toast('Type a valid order number first'); return; }
-    if (balP(r) > 0) $('q-amt').value = String(balP(r) / 100);
-  });
-  $('q-go').addEventListener('click', function () {
-    var no = parseInt($('q-no').value, 10), r = isNaN(no) ? null : findNo(qSide, no);
-    if (!r) { toast('Type a valid order number first'); return; }
-    payAsk(qSide, r, parseFloat($('q-amt').value), function () { $('q-amt').value = ''; $('q-no').value = ''; renderQuick(); });
-  });
 
   /* ---------- search / filter ---------- */
   function renderFindInfo() {
     Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) { b.classList.toggle('on', b.getAttribute('data-f') === fMode); });
-    var h = hiddenCount.out + hiddenCount.in;
-    $('f-info').textContent = (fText.trim() || fMode !== 'all') ? (h ? h + ' line' + (h > 1 ? 's' : '') + ' hidden by the search. Totals still count every line.' : 'Everything matches.') : '';
   }
-  $('f-text').addEventListener('input', function () { fText = this.value; renderList('out'); renderList('in'); renderFindInfo(); });
   Array.prototype.forEach.call(document.querySelectorAll('[data-f]'), function (b) {
     b.addEventListener('click', function () { fMode = b.getAttribute('data-f'); renderList('out'); renderList('in'); renderFindInfo(); });
   });
@@ -1533,16 +1493,16 @@
     });
   });
   $('copy-all').addEventListener('click', function () {
-    var L = ['Cash position — ' + dayLabel(todayKey()), ''];
-    [['OUT', 'out'], ['IN', 'in']].forEach(function (g) {
+    var L = ['Cash position · ' + dayLabel(todayKey()), ''];
+    [['OUT – to pay', 'out'], ['IN – cash & to collect', 'in']].forEach(function (g) {
       L.push(g[0]);
       state[g[1]].filter(function (r) { return hasAmount(r) && balP(r) > 0; }).forEach(function (r) {
-        L.push((r.no ? '#' + r.no + ' ' : '') + (r.name || '—') + ': ' + fmt(balP(r) / 100) + (paidP(r) > 0 ? ' (' + W(g[1]).partTxt + ', order ' + fmt(parseFloat(r.amount)) + ')' : ''));
+        L.push((r.name || '—') + ' ' + fmt(balP(r) / 100) + (paidP(r) > 0 ? ' (balance of ' + fmt(parseFloat(r.amount)) + ')' : ''));
       });
-      L.push('Total ' + g[0] + ': ' + fmt(sideTotalPaise(g[1]) / 100), '');
+      L.push('Total ' + fmt(sideTotalPaise(g[1]) / 100), '');
     });
     var d = sideTotalPaise('in') - sideTotalPaise('out');
-    L.push(d === 0 ? 'Balanced' : d < 0 ? 'Short ' + fmt(Math.abs(d) / 100) : 'Excess ' + fmt(d / 100));
+    L.push(d === 0 ? 'Balanced ✓' : d < 0 ? 'Short ' + fmt(Math.abs(d) / 100) : 'Excess ' + fmt(d / 100));
     copyText(L.join('\n'), 'Position copied as text');
   });
 
@@ -1580,6 +1540,11 @@
   }
   function closeDialog() { $('dialog').hidden = true; dialogFn = null; }
   $('loc-cancel').addEventListener('click', closeLoc);
+  ['office', 'shop'].forEach(function (k) {
+    $('adv-' + k).addEventListener('click', function () {
+      if (addAdvance($('adv-name').value, parseFloat($('adv-amt').value), k.toUpperCase())) { $('adv-name').value = ''; $('adv-amt').value = ''; }
+    });
+  });
   $('locdlg').addEventListener('click', function (e) { if (e.target === $('locdlg')) closeLoc(); });
   $('dialog-ok').addEventListener('click', function () { var f = dialogFn; closeDialog(); if (f) f(); });
   $('dialog-cancel').addEventListener('click', closeDialog);
@@ -1606,6 +1571,81 @@
   }
 
   /* ---------- paste -> review list -> Position ---------- */
+  /* ---------- money received before its collect order exists ---------- */
+  function addAdvance(name, a, loc) {
+    a = money(a); name = String(name || '').trim();
+    if (!name) { toast('Type the name'); return false; }
+    if (!(a > 0)) { toast('Type the amount received'); return false; }
+    var rec = { id: nid(), name: name, a: a, loc: loc, t: Date.now() };
+    state.adv.push(rec);
+    if (loc) adjCash(loc, paise(a));
+    state.paylog.push({ id: rec.id, side: 'in', no: 0, name: name, a: a, t: rec.t, done: false, how: '' });
+    save(); renderAll();
+    toast(name + ': ₹' + fmt(a) + ' received' + (loc ? ' · ' + (loc === 'SHOP' ? 'Shop' : 'Office') + ' ₹' + fmt(cashNow(loc) / 100) : '') + ' · waiting for its order', function () { dropAdv(rec, true); });
+    return true;
+  }
+  function dropAdv(rec, undoCash) {
+    state.adv = state.adv.filter(function (x) { return x !== rec; }); dropLog(rec.id);
+    if (undoCash && rec.loc) adjCash(rec.loc, -paise(rec.a));
+    save(); renderAll();
+  }
+  function advCands(rec) {
+    var nk = normKey(rec.name);
+    var open = openIn().filter(function (r) { return paise(rec.a) <= balP(r); });
+    var c = open.filter(function (r) { return nameKey(r) === nk; });
+    if (!c.length && nk.length >= 2) c = open.filter(function (r) { var k = nameKey(r); return k.indexOf(nk) >= 0 || (k.length >= 2 && nk.indexOf(k) >= 0); });
+    return c;
+  }
+  function linkAdv(rec, row) {          // the money is already in the cash amount; just put it on the order
+    if (paise(rec.a) > balP(row)) return false;
+    if (!Array.isArray(row.paid)) row.paid = [];
+    var pr = { a: rec.a, t: rec.t, id: rec.id, loc: rec.loc };
+    row.paid.push(pr);
+    state.adv = state.adv.filter(function (x) { return x !== rec; });
+    state.paylog.forEach(function (x) { if (x.id === rec.id) { x.no = row.no || 0; x.name = row.name || x.name; } });
+    save(); renderAll();
+    toast((row.name || '') + ': ₹' + fmt(rec.a) + ' received earlier is now on the order', function () {
+      row.paid = row.paid.filter(function (x) { return x !== pr; }); state.adv.push(rec);
+      state.paylog.forEach(function (x) { if (x.id === rec.id) x.no = 0; });
+      save(); renderAll();
+    });
+    return true;
+  }
+  function autoLinkAdv(rows) {
+    rows.forEach(function (row) {
+      state.adv.slice().forEach(function (rec) {
+        if (normKey(rec.name) === nameKey(row) && paise(rec.a) <= balP(row)) linkAdv(rec, row);
+      });
+    });
+  }
+  function renderAdv() {
+    var box = $('adv-pos'); if (!box) return;
+    if (!state.adv.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false; box.innerHTML = '';
+    var h = el('h3'); h.textContent = 'Received, order not added yet'; box.appendChild(h);
+    state.adv.forEach(function (rec) {
+      var row = el('div', 'entry'); row.style.marginTop = '8px';
+      var t = el('div'); t.style.display = 'flex'; t.style.justifyContent = 'space-between'; t.style.gap = '8px';
+      var l = el('b'); l.textContent = rec.name + ' · ₹' + fmt(rec.a) + (rec.loc ? ' · ' + (rec.loc === 'SHOP' ? 'Shop' : 'Office') : '');
+      var x = el('button', 'chip'); x.textContent = 'Remove ✕';
+      x.addEventListener('click', function () {
+        ask('Remove this receipt?', rec.name + ' ₹' + fmt(rec.a) + (rec.loc ? ' · the ' + (rec.loc === 'SHOP' ? 'Shop' : 'Office') + ' amount will be changed back' : ''), 'Remove', function () { dropAdv(rec, true); });
+      });
+      t.appendChild(l); t.appendChild(x); row.appendChild(t);
+      var cs = advCands(rec);
+      if (cs.length) {
+        var cc = el('div', 'chips');
+        cs.forEach(function (r) {
+          var b = el('button', 'chip go'); b.textContent = 'Put on #' + r.no + ' ' + (r.name || '') + ' (balance ₹' + fmt(balP(r) / 100) + ')';
+          b.addEventListener('click', function () { linkAdv(rec, r); });
+          cc.appendChild(b);
+        });
+        row.appendChild(cc);
+      } else { var hn = el('div', 'hint'); hn.textContent = 'It will go on the order by itself when a collect order with this name is added.'; row.appendChild(hn); }
+      box.appendChild(row);
+    });
+  }
+
   /* ---------- coded "Received" lines from the group, e.g.  FD 146.37.230 Received  (= 146,372.30) ---------- */
   var rcptItems = [];
   function decodeAmt(code) {            // dots are only separators, "b" = 00, last two digits are paise
@@ -1650,14 +1690,17 @@
       top.appendChild(cb); top.appendChild(t); row.appendChild(top);
       var info = el('div', 'hint');
       var bad = '';
-      if (it.dup) bad = 'Same line was already added earlier. Tick only if it is a new receipt.';
-      else if (!it.cands.length) bad = 'No open collect order for "' + it.name + '". Add the order first, or leave this one.';
+      if (!it.cands.length && it.adv === undefined) it.adv = true;
+      if (it.adv) { info.textContent = 'No open collect order: it will be kept as received, and put on the order when it is added.'; }
+      else if (it.dup) bad = 'Same line was already added earlier. Tick only if it is a new receipt.';
       else if (!it.pick) bad = 'More than one open order. Choose one:';
       else if (paise(it.a) > balP(it.pick)) bad = 'More than the balance ₹' + fmt(balP(it.pick) / 100) + ' of #' + it.pick.no + '. Check the amount.';
-      if (it.pick) info.textContent = '→ #' + it.pick.no + ' ' + (it.pick.name || '') + ' · balance ₹' + fmt(balP(it.pick) / 100) + ' → ₹' + fmt((balP(it.pick) - paise(it.a)) / 100);
+      if (it.pick && !it.adv) info.textContent = '→ #' + it.pick.no + ' ' + (it.pick.name || '') + ' · balance ₹' + fmt(balP(it.pick) / 100) + ' → ₹' + fmt((balP(it.pick) - paise(it.a)) / 100);
       row.appendChild(info);
       if (bad) { var w = el('div', 'dupwarn'); w.textContent = '⚠ ' + bad; row.appendChild(w); }
-      if (!it.pick && it.cands.length > 1) {
+      if (it.cands.length && !it.adv) { var na = el('button', 'chip'); na.textContent = 'No order — keep as received'; na.addEventListener('click', function () { it.adv = true; renderRcpt(); }); row.appendChild(na); }
+      if (it.adv && it.cands.length) { var ba = el('button', 'chip'); ba.textContent = 'Put it on an order instead'; ba.addEventListener('click', function () { it.adv = false; renderRcpt(); }); row.appendChild(ba); }
+      if (!it.pick && it.cands.length > 1 && !it.adv) {
         var cs = el('div', 'chips');
         it.cands.forEach(function (r) {
           var b = el('button', 'chip'); b.textContent = '#' + r.no + ' ' + (r.name || '') + ' · ₹' + fmt(balP(r) / 100);
@@ -1666,7 +1709,7 @@
         });
         row.appendChild(cs);
       }
-      it.ready = !!(it.pick && paise(it.a) <= balP(it.pick));
+      it.ready = !!(it.adv || (it.pick && paise(it.a) <= balP(it.pick)));
       if (it.on && it.ready) total += paise(it.a);
       box.appendChild(row);
     });
@@ -1680,7 +1723,9 @@
   function applyRcpt() {
     var done = 0, sum = 0, left = [];
     rcptItems.forEach(function (it) {
-      if (it.on && it.ready && it.pick && balP(it.pick) >= paise(it.a)) {
+      if (it.on && it.ready && it.adv) {
+        if (addAdvance(it.name, it.a, 'OFFICE')) { done++; sum += paise(it.a); state.rcpt.push(it.key); return; }
+      } else if (it.on && it.ready && it.pick && balP(it.pick) >= paise(it.a)) {
         if (recordPay('in', it.pick, it.a, 'OFFICE')) { done++; sum += paise(it.a); state.rcpt.push(it.key); return; }
       }
       left.push(it);
@@ -1735,6 +1780,7 @@
     state.stage[tab] = keep;
     save(); renderAll();
     toast('Added ' + move.length + ' to ' + (tab === 'out' ? 'OUT' : 'IN'));
+    if (tab === 'in') autoLinkAdv(move);
     if (!keep.length) showTab('position');
   }
 
@@ -1765,7 +1811,7 @@
   $('clear-btn').addEventListener('click', function () { confirmBar.classList.add('show'); });
   $('confirm-no').addEventListener('click', function () { confirmBar.classList.remove('show'); });
   $('confirm-yes').addEventListener('click', function () {
-    state.in = freshIn(); state.out = [blankRow()]; state.seq = { in: 0, out: 0 }; openPay = null;
+    state.in = freshIn(); state.out = [blankRow()]; state.seq = { in: 0, out: 0 }; openPay = null; state.adv = [];
     lastRemoved = null;
     save(); renderAll();
     confirmBar.classList.remove('show');
