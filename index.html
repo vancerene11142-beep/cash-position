@@ -376,8 +376,8 @@
       <button class="btn" id="copy-all">Copy as text</button>
     </div>
     <div class="actions">
-      <button class="btn grow" id="save-day">Save day</button>
-      <button class="btn grow" id="new-day">Save &amp; start new day</button>
+      <button class="btn grow" id="save-day">Save</button>
+      <button class="btn primary grow" id="new-day">New day ▸</button>
     </div>
     <div class="footer"><button class="clear-btn" id="clear-btn">Clear all lines</button></div>
     <div class="confirm-bar" id="confirm-bar">
@@ -1492,11 +1492,12 @@
     });
   }
   $('save-day').addEventListener('click', function () {
-    var upd = saveDay(); toast(upd ? 'Today updated in History' : 'Saved to History');
+    var upd = saveDay(); toast(upd ? 'Today updated' : 'Saved');
   });
   $('new-day').addEventListener('click', function () {
-    ask('Save today and start a new day?', 'Today is saved to History. Orders with a balance stay (with the balance as their amount); settled orders, SHOP and OFFICE amounts are cleared.', 'Save & start', function () {
-      saveDay(); var n = carryOver(); save(); renderAll(); toast('Saved. ' + n + ' open order' + (n === 1 ? '' : 's') + ' carried over');
+    var n = openSide('out').length + openSide('in').length;
+    ask('Start a new day?', 'Today is saved. ' + (n ? n + ' open order' + (n === 1 ? '' : 's') + ' carry over' : 'No open orders to carry') + '. Settled orders and Shop / Office amounts are cleared.', 'New day', function () {
+      saveDay(); var c = carryOver(); save(); renderAll(); toast('Saved · ' + c + ' open order' + (c === 1 ? '' : 's') + ' carried');
     });
   });
   $('copy-all').addEventListener('click', function () {
